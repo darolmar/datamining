@@ -1,394 +1,205 @@
+# ==============================================================================
+# 1. INSTALACIÓN Y CARGA DE PAQUETES
+# ==============================================================================
+# Instalar paquetes necesarios si aún no están instalados
+if (!requireNamespace("caret", quietly = TRUE)) install.packages("caret", dependencies=TRUE)
+if (!requireNamespace("nnet", quietly = TRUE)) install.packages("nnet", dependencies=TRUE)
+if (!requireNamespace("ggplot2", quietly = TRUE)) install.packages("ggplot2", dependencies=TRUE) 
 
-R version 4.5.2 Patched (2025-11-19 r89053) -- "[Not] Part in a Rumble"
-Copyright (C) 2025 The R Foundation for Statistical Computing
-Platform: aarch64-apple-darwin20
+library(caret)
+library(nnet) # Para el clasificador multinom (Regresión Logística Multinomial)
+library(ggplot2)
 
-R is free software and comes with ABSOLUTELY NO WARRANTY.
-You are welcome to redistribute it under certain conditions.
-Type 'license()' or 'licence()' for distribution details.
+# Establecer semilla para reproducibilidad
+set.seed(42)
 
-  Natural language support but running in an English locale
+# ==============================================================================
+# 2. PREPARACIÓN DE DATOS (IRIS)
+# ==============================================================================
+data(iris)
+dataset <- iris
+names(dataset) <- c("Sepal.Length", "Sepal.Width", "Petal.Length", "Petal.Width", "Species")
+error_rates <- matrix(NA, nrow = 10, ncol = 2, 
+                      dimnames = list(paste0("Fold", 1:10), c("C1_Multinom", "C2_kNN")))
+predictions_list <- list()
 
-R is a collaborative project with many contributors.
-Type 'contributors()' for more information and
-'citation()' on how to cite R or R packages in publications.
+# ==============================================================================
+# 3. IMPLEMENTACIÓN DEL 5X2-FOLD CROSS-VALIDATION
+# ==============================================================================
 
-Type 'demo()' for some demos, 'help()' for on-line help, or
-'help.start()' for an HTML browser interface to help.
-Type 'q()' to quit R.
+R <- 5 # Repeticiones
+k <- 2 # Bloques (folds)
 
-[R.app GUI 1.82 (8563) aarch64-apple-darwin20]
+for (i in 1:R) {
+  
+  # a) Crear partición estratificada 2-fold
+  folds <- createFolds(dataset$Species, k = k, list = TRUE, returnTrain = FALSE)
+  
+  for (j in 1:k) {
+    
+    # Asignar índices de train/test para la iteración actual (2i-1 y 2i)
+    if (j == 1) {
+      test_indices <- folds[[1]]
+      train_indices <- folds[[2]]
+      fold_idx <- 2*i - 1 # Índice impar (1, 3, 5, 7, 9)
+    } else {
+      test_indices <- folds[[2]]
+      train_indices <- folds[[1]]
+      fold_idx <- 2*i # Índice par (2, 4, 6, 8, 10)
+    }
+    
+    # C1: Regresión Logística Multinomial (Multinom)
+    model_c1 <- multinom(Species ~ ., data = dataset[train_indices, ], trace = FALSE, MaxNWts = 5000)
+    predictions_c1 <- predict(model_c1, newdata = dataset[test_indices, ])
+    confusion_matrix_c1 <- table(predictions_c1, dataset[test_indices, ]$Species)
+    error_c1 <- 1 - sum(diag(confusion_matrix_c1)) / sum(confusion_matrix_c1)
+    error_rates[fold_idx, 1] <- error_c1
+    
+    # C2: k-Vecinos Más Cercanos (kNN) con k=5
+    model_c2 <- knn3(Species ~ ., data = dataset[train_indices, ], k = 5)
+    predictions_c2 <- predict(model_c2, newdata = dataset[test_indices, ], type = "class")
+    confusion_matrix_c2 <- table(predictions_c2, dataset[test_indices, ]$Species)
+    error_c2 <- 1 - sum(diag(confusion_matrix_c2)) / sum(confusion_matrix_c2)
+    error_rates[fold_idx, 2] <- error_c2
+    
+    # Almacenar predicciones (SOLO para la primera repetición, i=1)
+    if (i == 1) {
+      predictions_list[[j]] <- list(C1 = predictions_c1, C2 = predictions_c2, Actual = dataset[test_indices, ]$Species)
+    }
+  }
+}
 
-[History restored from /Users/darolmar/.Rapp.history]
+cat("==============================================================================\n")
+cat("TASAS DE ERROR OBTENIDAS (10 iteraciones de 5x2-fold CV)\n")
+cat("==============================================================================\n")
+print(error_rates)
+cat("\n")
 
-> install.packages("caret", dependencies = TRUE)
---- Please select a CRAN mirror for use in this session ---
-also installing the dependencies ‘bit’, ‘prettyunits’, ‘bit64’, ‘progress’, ‘clipr’, ‘vroom’, ‘rbibutils’, ‘sys’, ‘otel’, ‘R.methodsS3’, ‘R.oo’, ‘R.utils’, ‘forcats’, ‘hms’, ‘readr’, ‘bitops’, ‘Rdpack’, ‘askpass’, ‘httpuv’, ‘xtable’, ‘sourcetools’, ‘later’, ‘promises’, ‘commonmark’, ‘R.cache’, ‘haven’, ‘caTools’, ‘TH.data’, ‘rappdirs’, ‘crayon’, ‘profileModel’, ‘minqa’, ‘nloptr’, ‘reformulas’, ‘RcppEigen’, ‘lazyeval’, ‘curl’, ‘mime’, ‘openssl’, ‘plotrix’, ‘shiny’, ‘miniUI’, ‘rstudioapi’, ‘styler’, ‘classInt’, ‘labelled’, ‘gplots’, ‘libcoin’, ‘matrixStats’, ‘multcomp’, ‘base64enc’, ‘cachem’, ‘fastmap’, ‘memoise’, ‘sass’, ‘fs’, ‘pkgbuild’, ‘rprojroot’, ‘diffobj’, ‘brglm’, ‘gtools’, ‘lme4’, ‘qvcalc’, ‘jsonlite’, ‘rex’, ‘httr’, ‘yaml’, ‘Formula’, ‘plotmo’, ‘combinat’, ‘questionr’, ‘evaluate’, ‘highr’, ‘xfun’, ‘ROCR’, ‘mvtnorm’, ‘modeltools’, ‘strucchange’, ‘coin’, ‘zoo’, ‘sandwich’, ‘bslib’, ‘fontawesome’, ‘htmltools’, ‘jquerylib’, ‘tinytex’, ‘brio’, ‘callr’, ‘desc’, ‘pkgload’, ‘praise’, ‘processx’, ‘ps’, ‘waldo’, ‘ROSE’, ‘BradleyTerry2’, ‘covr’, ‘Cubist’, ‘earth’, ‘ellipse’, ‘fastICA’, ‘gam’, ‘ipred’, ‘kernlab’, ‘klaR’, ‘knitr’, ‘mda’, ‘mlbench’, ‘MLmetrics’, ‘pamr’, ‘party’, ‘pls’, ‘randomForest’, ‘RANN’, ‘rmarkdown’, ‘spls’, ‘superpc’, ‘testthat’, ‘themis’
+# ==============================================================================
+# 4. TEST T DE STUDENT PAREADO (DIETTERICH, 5X2-FOLD CV)
+# ==============================================================================
 
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/bit_4.6.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/prettyunits_1.2.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/bit64_4.6.0-1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/progress_1.2.3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/clipr_0.8.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/vroom_1.6.6.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/rbibutils_2.4.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/sys_3.4.3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/otel_0.2.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/R.methodsS3_1.8.2.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/R.oo_1.27.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/R.utils_2.13.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/forcats_1.0.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/hms_1.1.4.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/readr_2.1.6.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/bitops_1.0-9.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/Rdpack_2.6.4.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/askpass_1.2.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/httpuv_1.6.16.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/xtable_1.8-4.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/sourcetools_0.1.7-1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/later_1.4.4.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/promises_1.5.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/commonmark_2.0.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/R.cache_0.17.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/haven_2.5.5.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/caTools_1.18.3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/TH.data_1.1-5.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/rappdirs_0.3.3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/crayon_1.5.3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/profileModel_0.6.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/minqa_1.2.8.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/nloptr_2.2.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/reformulas_0.4.2.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/RcppEigen_0.3.4.0.2.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/lazyeval_0.2.2.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/curl_7.0.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/mime_0.13.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/openssl_2.3.4.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/plotrix_3.8-13.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/shiny_1.11.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/miniUI_0.1.2.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/rstudioapi_0.17.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/styler_1.11.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/classInt_0.4-11.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/labelled_2.16.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/gplots_3.2.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/libcoin_1.0-10.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/matrixStats_1.5.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/multcomp_1.4-29.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/base64enc_0.1-3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/cachem_1.1.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/fastmap_1.2.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/memoise_2.0.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/sass_0.4.10.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/fs_1.6.6.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/pkgbuild_1.4.8.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/rprojroot_2.1.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/diffobj_0.3.6.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/brglm_0.7.3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/gtools_3.9.5.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/lme4_1.1-37.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/qvcalc_1.0.4.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/jsonlite_2.0.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/rex_1.2.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/httr_1.4.7.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/yaml_2.3.10.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/Formula_1.2-5.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/plotmo_3.6.4.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/combinat_0.0-8.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/questionr_0.8.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/evaluate_1.0.5.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/highr_0.11.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/xfun_0.54.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/ROCR_1.0-11.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/mvtnorm_1.3-3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/modeltools_0.2-24.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/strucchange_1.5-4.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/coin_1.4-3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/zoo_1.8-14.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/sandwich_3.1-1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/bslib_0.9.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/fontawesome_0.5.3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/htmltools_0.5.8.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/jquerylib_0.1.4.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/tinytex_0.58.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/brio_1.1.5.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/callr_3.7.6.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/desc_1.4.3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/pkgload_1.4.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/praise_1.0.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/processx_3.8.6.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/ps_1.9.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/waldo_0.6.2.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/ROSE_0.0-4.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/BradleyTerry2_1.1.3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/covr_3.6.5.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/Cubist_0.5.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/earth_5.3.4.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/ellipse_0.5.0.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/fastICA_1.2-7.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/gam_1.22-6.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/ipred_0.9-15.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/kernlab_0.9-33.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/klaR_1.7-3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/knitr_1.50.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/mda_0.5-5.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/mlbench_2.1-6.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/MLmetrics_1.1.3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/pamr_1.57.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/party_1.3-18.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/pls_2.8-5.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/randomForest_4.7-1.2.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/RANN_2.6.2.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/rmarkdown_2.30.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/spls_2.3-2.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/superpc_1.12.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/testthat_3.3.1.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/themis_1.0.3.tgz'
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/caret_7.0-1.tgz'
+cat("==============================================================================\n")
+cat("TEST T DE STUDENT PAREADO (DIETTERICH, 5X2-FOLD CV)\n")
+cat("==============================================================================\n")
 
-The downloaded binary packages are in
-	/var/folders/p9/2h56wcgs2gvbrg1c4w33957h0000gn/T//RtmpJFZAfq/downloaded_packages
-> install.packages("nnet", dependencies = TRUE)
-trying URL 'https://ftp.cixug.es/CRAN/bin/macosx/big-sur-arm64/contrib/4.5/nnet_7.3-20.tgz'
-Content type 'application/octet-stream' length 126267 bytes (123 KB)
-==================================================
-downloaded 123 KB
+# 1. Calcular las 5 diferencias medias d_i*
+diff_matrix <- error_rates[, 1] - error_rates[, 2]
+d_star <- rep(NA, R)
+for (i in 1:R) {
+  d_star[i] <- (diff_matrix[2*i - 1] + diff_matrix[2*i]) / 2
+}
+
+# 2. Calcular la media de las 5 diferencias medias (d_bar)
+d_bar <- mean(d_star)
+
+# 3. Calcular la varianza del estadístico t
+s2 <- sum((d_star - d_bar)^2) / R
+denominator_sd <- sqrt(s2)
+
+# 4. Calcular el estadístico t (df = R = 5)
+t_statistic <- d_bar / denominator_sd
+
+# 5. Calcular el p-valor (prueba de dos colas con 5 grados de libertad)
+df <- R
+p_value <- 2 * pt(-abs(t_statistic), df = df)
+
+cat(paste("Diferencias medias (d*):", paste(round(d_star, 4), collapse = ", "), "\n"))
+cat(paste("Media de las diferencias (d_bar):", round(d_bar, 4), "\n"))
+cat(paste("Estadístico t:", round(t_statistic, 4), "\n"))
+cat(paste("Grados de libertad (df):", df, "\n"))
+cat(paste("P-valor (dos colas):", p_value, "\n"))
+
+# Criterio de Decisión (Umbral de significatividad alfa = 0.05)
+if (p_value < 0.05) {
+  cat("\nDecisión: SE RECHAZA la Hipótesis Nula (H0). Existe una diferencia significativa.\n")
+} else {
+  cat("\nDecisión: NO SE RECHAZA la Hipótesis Nula (H0). La diferencia NO es significativa.\n")
+}
+
+cat("==============================================================================\n")
+
+# ==============================================================================
+# 6. VISUALIZACIÓN COMPARATIVA DE TASAS DE ERROR (BOXPLOT) [NUEVO]
+# ==============================================================================
+
+cat("==============================================================================\n")
+cat("VISUALIZACIÓN DE TASAS DE ERROR (BOXPLOT) [NUEVO]\n")
+cat("==============================================================================\n")
+
+# Convertir la matriz de tasas de error a un formato largo para ggplot
+error_df <- as.data.frame(error_rates)
+error_df$Fold <- rownames(error_df)
+error_long <- tidyr::gather(error_df, key = "Clasificador", value = "Tasa_Error", -Fold)
+
+# Crear el Boxplot
+boxplot_plot <- ggplot(error_long, aes(x = Clasificador, y = Tasa_Error, fill = Clasificador)) +
+  geom_boxplot() +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) + # Agregar puntos individuales
+  labs(
+    title = "Comparación de Tasas de Error (5x2-fold CV)",
+    x = "Algoritmo",
+    y = "Tasa de Error"
+  ) +
+  scale_fill_manual(values = c("C1_Multinom" = "lightblue", "C2_kNN" = "lightcoral")) +
+  theme_minimal()
+
+# Mostrar el gráfico (esto generará el gráfico si R está ejecutándose en un entorno gráfico)
+print(boxplot_plot) 
+
+# Nota para la entrega: Debe guardar el gráfico en un archivo y añadirlo al informe.
+# Ejemplo de cómo guardarlo:
+# ggsave("boxplot_tasas_error.png", plot = boxplot_plot, width = 6, height = 4)
+
+cat("Se ha generado la estructura para el boxplot comparativo.\n")
+cat("El análisis visual debe confirmar si las distribuciones de error se solapan ampliamente.\n")
+cat("==============================================================================\n")
 
 
-The downloaded binary packages are in
-	/var/folders/p9/2h56wcgs2gvbrg1c4w33957h0000gn/T//RtmpJFZAfq/downloaded_packages
-> library("caret")
-Loading required package: ggplot2
-Loading required package: lattice
-> library("nnet")
-> # Establecer semilla para reproducibilidad (esto asegura que la selección aleatoria
-> # y las particiones sean las mismas en cada ejecución).
-> set.seed(42)
-> 
-> # ==============================================================================
-> # 2. PREPARACIÓN DE DATOS (IRIS)
-> # ==============================================================================
-> data(iris)
-> dataset <- iris
-> 
-> # Renombrar columnas para evitar problemas en multinom
-> names(dataset) <- c("Sepal.Length", "Sepal.Width", "Petal.Length", "Petal.Width", "Species")
-> 
-> # Variables para almacenar resultados (5 repeticiones x 2 bloques x 2 clasificadores)
-> # La matriz de error almacenará 10 tasas de error por clasificador.
-> error_rates <- matrix(NA, nrow = 10, ncol = 2, 
-+                       dimnames = list(paste0("Fold", 1:10), c("C1_Multinom", "C2_kNN")))
-> 
-> # Lista para almacenar las predicciones de la primera repetición,
-> # necesarias para el Test de McNemar
-> predictions_list <- list()
-> 
-> # ==============================================================================
-> # 3. IMPLEMENTACIÓN DEL 5X2-FOLD CROSS-VALIDATION
-> # ==============================================================================
-> 
-> # El 5x2-fold CV implica 5 repeticiones de un 2-fold CV estratificado.
-> R <- 5 # Repeticiones
-> k <- 2 # Bloques (folds)
-> 
-> for (i in 1:R) {
-+   
-+   # a) Crear partición estratificada 2-fold (índices para train/test)
-+   # Utilizar 'createFolds' con k=2 para dividir en dos bloques (50% cada uno)
-+   folds <- createFolds(dataset$Species, k = k, list = TRUE, returnTrain = FALSE)
-+   
-+   # i) Bloque 1 (Fold 1 Test, Fold 2 Train)
-+   test_indices_1 <- folds[[1]]
-+   train_indices_1 <- folds[[2]]
-+   
-+   # ii) Bloque 2 (Fold 2 Test, Fold 1 Train)
-+   test_indices_2 <- folds[[2]]
-+   train_indices_2 <- folds[[1]]
-+   
-+   # Entrenar y evaluar en los dos bloques
-+   
-+   for (j in 1:k) {
-+     
-+     # Asignar índices de train/test para la iteración actual (2i-1 y 2i)
-+     if (j == 1) {
-+       train_indices <- train_indices_1
-+       test_indices <- test_indices_1
-+       fold_idx <- 2*i - 1 # Índice impar (1, 3, 5, 7, 9)
-+     } else {
-+       train_indices <- train_indices_2
-+       test_indices <- test_indices_2
-+       fold_idx <- 2*i # Índice par (2, 4, 6, 8, 10)
-+     }
-+     
-+     # ----------------------------------------------------
-+     # C1: Regresión Logística Multinomial (Multinom)
-+     # ----------------------------------------------------
-+     # maxNWts se aumenta para evitar errores de convergencia en conjuntos pequeños
-+     model_c1 <- multinom(Species ~ ., data = dataset[train_indices, ], trace = FALSE, MaxNWts = 5000)
-+     predictions_c1 <- predict(model_c1, newdata = dataset[test_indices, ])
-+     
-+     # Métrica: Tasa de Error
-+     confusion_matrix_c1 <- table(predictions_c1, dataset[test_indices, ]$Species)
-+     error_c1 <- 1 - sum(diag(confusion_matrix_c1)) / sum(confusion_matrix_c1)
-+     error_rates[fold_idx, 1] <- error_c1
-+     
-+     # ----------------------------------------------------
-+     # C2: k-Vecinos Más Cercanos (kNN) con k=5
-+     # ----------------------------------------------------
-+     # Usamos train() de caret para ajustar el mejor k (simplificado a k=5 aquí para rapidez)
-+     model_c2 <- knn3(Species ~ ., data = dataset[train_indices, ], k = 5)
-+     predictions_c2 <- predict(model_c2, newdata = dataset[test_indices, ], type = "class")
-+     
-+     # Métrica: Tasa de Error
-+     confusion_matrix_c2 <- table(predictions_c2, dataset[test_indices, ]$Species)
-+     error_c2 <- 1 - sum(diag(confusion_matrix_c2)) / sum(confusion_matrix_c2)
-+     error_rates[fold_idx, 2] <- error_c2
-+     
-+     # Almacenar predicciones (SOLO para la primera repetición, i=1)
-+     if (i == 1) {
-+       predictions_list[[j]] <- list(C1 = predictions_c1, C2 = predictions_c2, Actual = dataset[test_indices, ]$Species)
-+     }
-+   }
-+ }
-> 
-> # Mostrar todas las tasas de error obtenidas
-> cat("==============================================================================\n")
-==============================================================================
-> cat("TASAS DE ERROR OBTENIDAS (10 iteraciones de 5x2-fold CV)\n")
-TASAS DE ERROR OBTENIDAS (10 iteraciones de 5x2-fold CV)
-> cat("==============================================================================\n")
-==============================================================================
-> print(error_rates)
-       C1_Multinom     C2_kNN
-Fold1   0.05333333 0.02666667
-Fold2   0.05333333 0.01333333
-Fold3   0.02666667 0.02666667
-Fold4   0.04000000 0.04000000
-Fold5   0.04000000 0.01333333
-Fold6   0.06666667 0.02666667
-Fold7   0.02666667 0.04000000
-Fold8   0.02666667 0.04000000
-Fold9   0.02666667 0.08000000
-Fold10  0.06666667 0.09333333
-> cat("\n")
+# ==============================================================================
+# 5. TEST DE MCNEMAR (MOVIDO AL FINAL PARA MANTENER ORDEN)
+# ==============================================================================
 
-> 
-> # ==============================================================================
-> # 4. TEST T DE STUDENT PAREADO (DIETTERICH, 5X2-FOLD CV)
-> # ==============================================================================
-> 
-> cat("==============================================================================\n")
-==============================================================================
-> cat("TEST T DE STUDENT PAREADO (DIETTERICH, 5X2-FOLD CV)\n")
-TEST T DE STUDENT PAREADO (DIETTERICH, 5X2-FOLD CV)
-> cat("==============================================================================\n")
-==============================================================================
-> 
-> # 1. Calcular las 5 diferencias medias d_i*
-> # d_i* = 0.5 * [(Error_C1_impar - Error_C2_impar) + (Error_C1_par - Error_C2_par)]
-> diff_matrix <- error_rates[, 1] - error_rates[, 2]
-> d_star <- rep(NA, R)
-> for (i in 1:R) {
-+   d_star[i] <- (diff_matrix[2*i - 1] + diff_matrix[2*i]) / 2
-+ }
-> 
-> # 2. Calcular la media de las 5 diferencias medias (d_bar)
-> d_bar <- mean(d_star)
-> 
-> # 3. Calcular la varianza del estadístico t
-> # Varianza = 1/R * sum((d_i* - d_bar)^2)
-> s2 <- sum((d_star - d_bar)^2) / R
-> # Desviación estándar del denominador del t-test
-> denominator_sd <- sqrt(s2)
-> 
-> # 4. Calcular el estadístico t (df = R = 5)
-> t_statistic <- d_bar / denominator_sd
-> 
-> # 5. Calcular el p-valor (prueba de dos colas con 5 grados de libertad)
-> df <- R
-> p_value <- 2 * pt(-abs(t_statistic), df = df)
-> 
-> cat(paste("Diferencias medias (d*):", paste(round(d_star, 4), collapse = ", "), "\n"))
-Diferencias medias (d*): 0.0333, 0, 0.0333, -0.0133, -0.04 
-> cat(paste("Media de las diferencias (d_bar):", round(d_bar, 4), "\n"))
-Media de las diferencias (d_bar): 0.0027 
-> cat(paste("Estadístico t:", round(t_statistic, 4), "\n"))
-Estadístico t: 0.0947 
-> cat(paste("Grados de libertad (df):", df, "\n"))
-Grados de libertad (df): 5 
-> cat(paste("P-valor (dos colas):", p_value, "\n"))
-P-valor (dos colas): 0.928229099956131 
-> 
-> # Criterio de Decisión (Umbral de significatividad alfa = 0.05)
-> if (p_value < 0.05) {
-+   cat("\nDecisión: SE RECHAZA la Hipótesis Nula (H0). Existe una diferencia significativa.\n")
-+ } else {
-+   cat("\nDecisión: NO SE RECHAZA la Hipótesis Nula (H0). La diferencia NO es significativa.\n")
-+ }
+cat("TEST DE MCNEMAR (Aplicado al conjunto de prueba combinado de la primera repetición)\n")
+cat("==============================================================================\n")
 
-Decisión: NO SE RECHAZA la Hipótesis Nula (H0). La diferencia NO es significativa.
-> 
-> cat("==============================================================================\n")
-==============================================================================
-> 
-> # ==============================================================================
-> # 5. TEST DE MCNEMAR
-> # ==============================================================================
-> # Se aplica a las predicciones del primer bloque de la primera repetición (Fold 1)
-> cat("TEST DE MCNEMAR (Aplicado al primer pliegue de la primera repetición)\n")
-TEST DE MCNEMAR (Aplicado al primer pliegue de la primera repetición)
-> cat("==============================================================================\n")
-==============================================================================
-> 
-> # 1. Obtener las predicciones del primer fold de la primera repetición
-> C1_pred <- predictions_list[[1]]$C1
-> C2_pred <- predictions_list[[1]]$C2
-> Actual <- predictions_list[[1]]$Actual
-> 
-> # Determinar aciertos/fallos
-> C1_errors <- C1_pred != Actual
-> C2_errors <- C2_pred != Actual
-> 
-> # 2. Construir la Tabla de Contingencia (solo celdas de desacuerdo)
-> # n_01: C1 Falla, C2 Acierta
-> n_01 <- sum(C1_errors & !C2_errors) 
-> # n_10: C1 Acierta, C2 Falla
-> n_10 <- sum(!C1_errors & C2_errors) 
-> 
-> cat(paste("C1 falla, C2 acierta (n_01):", n_01, "\n"))
-C1 falla, C2 acierta (n_01): 3 
-> cat(paste("C1 acierta, C2 falla (n_10):", n_10, "\n"))
-C1 acierta, C2 falla (n_10): 1 
-> 
-> # 3. Calcular el estadístico Chi-cuadrado (con corrección de continuidad)
-> # Formula: chi2 = (|n_01 - n_10| - 1)^2 / (n_01 + n_10)
-> if (n_01 + n_10 > 0) {
-+   chi2_statistic <- (abs(n_01 - n_10) - 1)^2 / (n_01 + n_10)
-+   
-+   # 4. Calcular el p-valor (distribución Chi-cuadrado con 1 grado de libertad)
-+   p_value_mcnemar <- pchisq(chi2_statistic, df = 1, lower.tail = FALSE)
-+   
-+   # Umbral de significatividad (alfa = 0.05)
-+   chi2_critical <- qchisq(0.95, df = 1)
-+   
-+   cat(paste("Estadístico Chi-cuadrado:", round(chi2_statistic, 4), "\n"))
-+   cat(paste("Umbral Chi-cuadrado (alfa=0.05, df=1):", round(chi2_critical, 4), "\n"))
-+   cat(paste("P-valor:", p_value_mcnemar, "\n"))
-+   
-+   # 5. Criterio de Decisión
-+   if (p_value_mcnemar < 0.05) {
-+     cat("\nDecisión: SE RECHAZA la Hipótesis Nula (H0). La diferencia es significativa.\n")
-+   } else {
-+     cat("\nDecisión: NO SE RECHAZA la Hipótesis Nula (H0). La diferencia NO es significativa.\n")
-+   }
-+ } else {
-+   cat("No hubo desacuerdos (n_01 + n_10 = 0). El Test de McNemar no es aplicable.\n")
-+ }
-Estadístico Chi-cuadrado: 0.25 
-Umbral Chi-cuadrado (alfa=0.05, df=1): 3.8415 
-P-valor: 0.617075077451974 
+# Concatenar predicciones y reales de los dos folds de la primera repetición
+C1_pred_combined <- c(predictions_list[[1]]$C1, predictions_list[[2]]$C1)
+C2_pred_combined <- c(predictions_list[[1]]$C2, predictions_list[[2]]$C2)
+Actual_combined <- c(predictions_list[[1]]$Actual, predictions_list[[2]]$Actual)
 
-Decisión: NO SE RECHAZA la Hipótesis Nula (H0). La diferencia NO es significativa.
-> cat("==============================================================================\n")
-==============================================================================
-> 
+# Determinar aciertos/fallos
+C1_errors <- C1_pred_combined != Actual_combined
+C2_errors <- C2_pred_combined != Actual_combined
+
+# 1. Construir la Tabla de Contingencia (solo celdas de desacuerdo)
+n_01 <- sum(C1_errors & !C2_errors) 
+n_10 <- sum(!C1_errors & C2_errors) 
+
+cat(paste("C1 falla, C2 acierta (n_01):", n_01, "\n"))
+cat(paste("C1 acierta, C2 falla (n_10):", n_10, "\n"))
+
+# 2. Calcular el estadístico Chi-cuadrado (con corrección de continuidad)
+if (n_01 + n_10 > 0 && abs(n_01 - n_10) > 0) {
+  chi2_statistic <- (abs(n_01 - n_10) - 1)^2 / (n_01 + n_10)
+  
+  # 3. Calcular el p-valor (distribución Chi-cuadrado con 1 grado de libertad)
+  p_value_mcnemar <- pchisq(chi2_statistic, df = 1, lower.tail = FALSE)
+  
+  # Umbral de significatividad (alfa = 0.05)
+  chi2_critical <- qchisq(0.95, df = 1)
+  
+  cat(paste("Estadístico Chi-cuadrado:", round(chi2_statistic, 4), "\n"))
+  cat(paste("Umbral Chi-cuadrado (alfa=0.05, df=1):", round(chi2_critical, 4), "\n"))
+  cat(paste("P-valor:", p_value_mcnemar, "\n"))
+  
+  # 4. Criterio de Decisión
+  if (p_value_mcnemar < 0.05) {
+    cat("\nDecisión: SE RECHAZA la Hipótesis Nula (H0). La diferencia es significativa.\n")
+  } else {
+    cat("\nDecisión: NO SE RECHAZA la Hipótesis Nula (H0). La diferencia NO es significativa.\n")
+  }
+} else {
+  cat("El Test de McNemar no es concluyente o no hay desacuerdos suficientes.\n")
+}
+cat("==============================================================================\n")
