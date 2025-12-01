@@ -1,0 +1,243 @@
+# ==============================================================================
+# ==============================================================================
+# PRÁCTICA 2: EVALUACIÓN DE LA RELEVANCIA DE VARIABLES DE ENTRADA
+# Script para la generación de datos sintéticos y la aplicación de 5 técnicas
+# de selección de variables.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. INSTALACIÓN Y CARGA DE PAQUETES
+# ------------------------------------------------------------------------------
+# Instalar los paquetes necesarios si aún no están en el sistema:
+if (!requireNamespace("FSelectorRcpp", quietly = TRUE)) install.packages("FSelectorRcpp", dependencies=TRUE) # Para Ganancia de Información (IG)
+if (!requireNamespace("caret", quietly = TRUE)) install.packages("caret", dependencies=TRUE) # Para Wrapper (Forward Selection) y Validación Cruzada
+if (!requireNamespace("dplyr", quietly = TRUE)) install.packages("dplyr", dependencies=TRUE) # Para manipulación de datos
+
+library(FSelectorRcpp)
+library(caret)
+library(dplyr)
+library(stats) # Incluye funciones para chi-cuadrado, PCA y p.adjust (FDR)
+
+
+# ------------------------------------------------------------------------------
+# 2. GENERACIÓN DEL CONJUNTO DE DATOS SINTÉTICO (N=100)
+# Definición Teórica: X1, X2, X3, X5 ~ i.i.d. U(0,1)
+# X4 = X1 XOR X2 XOR X3
+# Y = X1 XOR X4  (Teóricamente Y = X2 XOR X3)
+# ------------------------------------------------------------------------------
+
+# Número de instancias
+n <- 100
+
+# Generación de variables base y la irrelevante (0 o 1 con P=0.5)
+X1 <- sample(c(0, 1), n, replace = TRUE)
+X2 <- sample(c(0, 1), n, replace = TRUE)
+X3 <- sample(c(0, 1), n, replace = TRUE)
+X5 <- sample(c(0, 1), n, replace = TRUE) # Totalmente irrelevante
+
+# Generación de la variable compuesta X4 (XOR de tres)
+# El operador %% 2 calcula el módulo 2, que es equivalente a XOR para valores binarios
+X4 <- (X1 + X2 + X3) %% 2
+
+# Generación de la clase Y (Y = X1 XOR X4)
+Y <- (X1 + X4) %% 2
+
+# Crear el data frame con variables como 'factor' para las técnicas categóricas
+data_df <- data.frame(
+  X1 = factor(X1),
+  X2 = factor(X2),
+  X3 = factor(X3),
+  X4 = factor(X4),
+  X5 = factor(X5),
+  Y = factor(Y)
+)
+
+cat("--- Resumen de la Distribución de la Clase ---\n")
+print(table(data_df$Y))
+cat("\n")
+
+
+# ------------------------------------------------------------------------------
+# 3. MÉTODOS DE FILTRADO (IG, Chi-Cuadrado, FDR)
+# ------------------------------------------------------------------------------
+
+# --- 3.1. Ganancia de Información (Information Gain - IG) ---
+cat("--- 3.1. Ganancia de Información (IG) ---\n")
+# IG: Mide la reducción de la entropía de Y al conocer X_i. Mayor IG = Más relevante.
+ig_results <- informationGain(Y ~ ., data_df)
+ig_ranking <- ig_results %>%
+  arrange(desc(importance)) %>%
+  rename(IG_Valor = importance)
+
+print(ig_ranking)
+cat("\n")
+
+# --- 3.2. Estadístico Chi-Cuadrado (Chi2) ---
+cat("--- 3.2. Estadístico Chi-Cuadrado (Chi2) ---\n")
+chi2_results <- data.frame()
+
+# Iterar sobre cada predictor (X1 a X5) y aplicar chisq.test
+for (col in names(data_df)[1:5]) {
+  test_result <- chisq.test(data_df[[col]], data_df$Y)
+  chi2_results <- rbind(chi2_results, data.frame(
+    Variable = col,
+    Chi2_Stat = test_result$statistic,
+    p_value = test_result$p.value
+  ))
+}
+
+# Ranking Chi-Cuadrado (por estadístico descendente)
+chi2_ranking <- chi2_results %>%
+  arrange(desc(Chi2_Stat))
+
+print(chi2_ranking)
+cat("\n")
+
+# --- 3.3. Filtrado con Tasa de Falsos Descubrimientos (FDR) ---
+cat("--- 3.3. Filtrado con FDR (Q = 0.05) ---\n")
+# Aplicar Corrección FDR (Benjamini-Hochberg) a los p-valores del Chi-Cuadrado
+chi2_results$FDR_p_value <- p.adjust(chi2_results$p_value, method = "BH")
+fdr_threshold <- 0.05
+
+# Variables seleccionadas: p-valor corregido <= Q
+fdr_selected <- chi2_results %>%
+  filter(FDR_p_value <= fdr_threshold) %>%
+  arrange(p_value)
+
+cat(sprintf("Umbral de FDR (Q): %.2f\n", fdr_threshold))
+if (nrow(fdr_selected) > 0) {
+  cat("Variables Seleccionadas por FDR:\n")
+  print(fdr_selected)
+} else {
+  cat("Ninguna variable fue seleccionada con el umbral FDR (Q=0.05).\n")
+}
+cat("\n")
+
+
+# ------------------------------------------------------------------------------
+# 4. EXTRACCIÓN DE CARACTERÍSTICAS (Análisis de Componentes Principales - PCA)
+# ------------------------------------------------------------------------------
+cat("--- 4. Análisis de Componentes Principales (PCA) ---\n")
+
+# Convertir a data frame numérico (0/1) para PCA
+data_numeric <- as.data.frame(lapply(data_df[, 1:5], as.numeric))
+
+# Aplicar PCA (sobre la matriz de covarianza, sin escalar por ser binarias)
+pca_model <- prcomp(data_numeric, center = TRUE, scale. = FALSE)
+
+# Varianza Explicada
+pca_variance <- data.frame(
+  PC = 1:5,
+  Varianza = pca_model$sdev^2,
+  Prop_Varianza = (pca_model$sdev^2) / sum(pca_model$sdev^2),
+  Varianza_Acumulada = cumsum((pca_model$sdev^2) / sum(pca_model$sdev^2))
+)
+
+cat("Varianza Explicada por Componente Principal:\n")
+print(pca_variance)
+
+# Pesos de las variables originales en los primeros 2 Componentes Principales (k=2)
+cat("\nPesos (Loadings) en los dos primeros Componentes Principales (Z1 y Z2):\n")
+pca_weights <- as.data.frame(pca_model$rotation[, 1:2])
+pca_weights$Variable <- rownames(pca_weights)
+print(pca_weights)
+cat("\n")
+
+
+# ------------------------------------------------------------------------------
+# 5. MÉTODO DE ENVOLTURA (Forward Selection con 1-NN)
+# ------------------------------------------------------------------------------
+cat("--- 5. Forward Selection (FS) con 1-NN ---\n")
+
+# Parámetros del experimento
+classifier_method <- "knn"
+k_neighbors <- 1 # k=1 (1-NN)
+validation_folds <- 10 # 10-fold Cross-Validation
+max_vars <- 4 # Criterio de parada 1: Máximo 4 variables
+improvement_threshold <- 0.01 # Criterio de parada 2: Mejora >= 0.01
+
+# Definición del control de entrenamiento (Validación Cruzada)
+train_control <- trainControl(method = "cv", number = validation_folds)
+
+# Lista de variables disponibles (predictoras)
+available_vars <- names(data_df)[1:5]
+selected_vars <- c()
+best_accuracy <- 0
+fs_history <- data.frame(Step = integer(), Added_Var = character(), New_Set = character(), Accuracy = numeric(), stringsAsFactors = FALSE)
+
+cat(sprintf("Iniciando Forward Selection con %d-NN (10-fold CV).\n", k_neighbors))
+cat(sprintf("Criterio de parada: Mejora > %.2f o Máx %d variables.\n", improvement_threshold, max_vars))
+
+step <- 1
+keep_searching <- TRUE
+
+while (keep_searching) {
+  
+  if (length(selected_vars) == max_vars) {
+    cat(sprintf("\nPARADA: Se alcanzó el número máximo de variables (%d).\n", max_vars))
+    break
+  }
+  
+  # Variables candidatas a añadir
+  candidates <- setdiff(available_vars, selected_vars)
+  if (length(candidates) == 0) {
+      break # Todas las variables han sido seleccionadas
+  }
+  
+  best_candidate <- NULL
+  max_current_accuracy <- -Inf
+  
+  # Evaluar cada variable candidata
+  for (candidate in candidates) {
+    current_set <- c(selected_vars, candidate)
+    
+    # Construir la fórmula
+    formula_str <- paste("Y ~", paste(current_set, collapse = " + "))
+    
+    # Entrenar el modelo con el subconjunto actual
+    model <- train(
+      as.formula(formula_str),
+      data = data_df,
+      method = classifier_method,
+      trControl = train_control,
+      tuneGrid = data.frame(k = k_neighbors)
+    )
+    
+    # Obtener el rendimiento (Accuracy)
+    current_accuracy <- model$results$Accuracy[model$results$k == k_neighbors]
+    
+    if (current_accuracy > max_current_accuracy) {
+      max_current_accuracy <- current_accuracy
+      best_candidate <- candidate
+    }
+  }
+  
+  # Aplicar criterio de parada (mejora significativa)
+  improvement <- max_current_accuracy - best_accuracy
+  
+  if (improvement >= improvement_threshold) {
+    selected_vars <- c(selected_vars, best_candidate)
+    best_accuracy <- max_current_accuracy
+    
+    # Registrar el paso en el historial
+    fs_history <- rbind(fs_history, data.frame(
+      Step = step,
+      Added_Var = best_candidate,
+      New_Set = paste(selected_vars, collapse = ", "),
+      Accuracy = best_accuracy
+    ))
+    cat(sprintf("Paso %d: Añadida %s. Subconjunto: {%s}. Accuracy CV: %.4f\n",
+                step, best_candidate, paste(selected_vars, collapse = ", "), best_accuracy))
+    step <- step + 1
+  } else {
+    cat(sprintf("\nPARADA: La mejora (%.4f) fue menor que el umbral (%.4f).\n",
+                improvement, improvement_threshold))
+    keep_searching <- FALSE
+  }
+}
+
+cat("\n--- Resultados Finales del Wrapper ---\n")
+cat("Subconjunto Final Elegido por FS: {", paste(selected_vars, collapse = ", "), "}\n", sep = "")
+cat(sprintf("Mejor Accuracy CV Alcanzada: %.4f\n", best_accuracy))
+cat("\nHistorial Completo del Proceso:\n")
+print(fs_history)
