@@ -9,13 +9,13 @@
 # 1. INSTALACIÓN Y CARGA DE PAQUETES
 # ------------------------------------------------------------------------------
 # Instalar los paquetes necesarios si aún no están en el sistema:
-if (!requireNamespace("FSelectorRcpp", quietly = TRUE)) install.packages("FSelectorRcpp", dependencies=TRUE) # Para Ganancia de Información (IG)
+if (!requireNamespace("FSelector", quietly = TRUE)) install.packages("FSelectorRcpp", dependencies=TRUE) # Para Ganancia de Información (IG)
 if (!requireNamespace("caret", quietly = TRUE)) install.packages("caret", dependencies=TRUE) # Para Wrapper (Forward Selection) y Validación Cruzada
-if (!requireNamespace("dplyr", quietly = TRUE)) install.packages("dplyr", dependencies=TRUE) # Para manipulación de datos
+#if (!requireNamespace("dplyr", quietly = TRUE)) install.packages("dplyr", dependencies=TRUE) # Para manipulación de datos
 
-library(FSelectorRcpp)
+library(FSelector)
 library(caret)
-library(dplyr)
+#library(dplyr)
 library(stats) # Incluye funciones para chi-cuadrado, PCA y p.adjust (FDR)
 
 
@@ -55,6 +55,16 @@ data_df <- data.frame(
 cat("--- Resumen de la Distribución de la Clase ---\n")
 print(table(data_df$Y))
 cat("\n")
+
+# Verificar distribuciones
+cat("\n=== DISTRIBUCIÓN DE VARIABLES ===\n")
+summary(data_df)
+
+cat("\n=== VERIFICACIÓN DE PROPORCIONES (deben estar cerca de 0.5) ===\n")
+for (col in names(data_df)) {
+  prop <- mean(as.numeric(as.character(data_df[[col]])))
+  cat(sprintf("%s: %.3f\n", col, prop))
+}
 
 
 # ------------------------------------------------------------------------------
