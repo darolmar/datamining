@@ -12,11 +12,13 @@
 if (!requireNamespace("FSelectorRccp", quietly = TRUE)) install.packages("FSelectorRcpp", dependencies=TRUE) # Para Ganancia de Información (IG)
 if (!requireNamespace("caret", quietly = TRUE)) install.packages("caret", dependencies=TRUE) # Para Wrapper (Forward Selection) y Validación Cruzada
 if (!requireNamespace("dplyr", quietly = TRUE)) install.packages("dplyr", dependencies=TRUE) # Para manipulación de datos
+if (!requireNamespace("factoextra", quietly = TRUE)) install.packages("factoextra", dependencies=TRUE) # Para Gráficos más estéticos
 
 library(FSelectorRcpp)
 library(caret)
 library(dplyr)
 library(stats) # Incluye funciones para chi-cuadrado, PCA y p.adjust (FDR)
+library(factoextra)
 
 
 # ------------------------------------------------------------------------------
@@ -147,12 +149,32 @@ cat("Varianza Explicada por Componente Principal:\n")
 print(pca_variance)
 
 # Pesos de las variables originales en los primeros 2 Componentes Principales (k=2)
-cat("\nPesos (Loadings) en los dos primeros Componentes Principales (Z1 y Z2):\n")
+cat("\nPesos en los dos primeros Componentes Principales (Z1 y Z2):\n")
 pca_weights <- as.data.frame(pca_model$rotation[, 1:2])
 pca_weights$Variable <- rownames(pca_weights)
 print(pca_weights)
 cat("\n")
 
+# Visualización con Biplot
+# El biplot muestra las variables como vectores y las instancias como puntos.
+# scale = 0 ajusta los vectores de carga de las variables y los puntos de las observaciones
+# para que ambos encajen en el mismo gráfico, permitiendo su interpretación conjunta.
+# Las etiquetas 'xlab' y 'ylab' se toman de la tabla de varianza.
+
+# Generar el Biplot
+biplot(pca_model, 
+       scale = 0, 
+       xlab = "PC1 (32.11% de Varianza)", 
+       ylab = "PC2 (21.27% de Varianza)",
+       main = "Biplot de Componentes Principales")
+
+fviz_pca_biplot(pca_model, 
+                 repel = TRUE, # Evita el solapamiento de texto
+                 col.var = "black", # Color de los vectores de las variables
+                 geom.ind = "point", # Muestra las observaciones como puntos
+                 xlab = "PC1 (32.11% de Varianza)", 
+                 ylab = "PC2 (21.27% de Varianza)"
+)
 
 # ------------------------------------------------------------------------------
 # 5. MÉTODO DE ENVOLTURA (Forward Selection con 1-NN)
