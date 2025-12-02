@@ -13,12 +13,14 @@ if (!requireNamespace("FSelectorRccp", quietly = TRUE)) install.packages("FSelec
 if (!requireNamespace("caret", quietly = TRUE)) install.packages("caret", dependencies=TRUE) # Para Wrapper (Forward Selection) y Validación Cruzada
 if (!requireNamespace("dplyr", quietly = TRUE)) install.packages("dplyr", dependencies=TRUE) # Para manipulación de datos
 if (!requireNamespace("factoextra", quietly = TRUE)) install.packages("factoextra", dependencies=TRUE) # Para Gráficos más estéticos
+if (!requireNamespace("ggplot2", quietly = TRUE)) install.packages("ggplot2", dependencies=TRUE) # Para Gráficos más estéticos
 
 library(FSelectorRcpp)
 library(caret)
 library(dplyr)
 library(stats) # Incluye funciones para chi-cuadrado, PCA y p.adjust (FDR)
 library(factoextra)
+library(ggplot2)
 
 # Establecer semilla para reproducibilidad
 set.seed(42)
@@ -275,3 +277,53 @@ cat("Subconjunto Final Elegido por FS: {", paste(selected_vars, collapse = ", ")
 cat(sprintf("Mejor Accuracy CV Alcanzada: %.4f\n", best_accuracy))
 cat("\nHistorial Completo del Proceso:\n")
 print(fs_history)
+
+cat("\n--- Generando Gráfico de Evolución de Accuracy ---\n")
+
+# Recrear la variable del eje X (Número de variables) a partir de fs_history
+fs_history$Num_Variables <- 1:nrow(fs_history)
+
+# Definir el punto de detención (último número de variables seleccionado)
+punto_detencion_x <- nrow(fs_history)
+
+# Generar el Gráfico con ggplot2
+plot_accuracy_evolution <- ggplot(fs_history, aes(x = Num_Variables, y = Accuracy)) +
+  
+  # Línea Horizontal (Precisión Perfecta)
+  geom_hline(yintercept = 1.0, 
+             linetype = "dashed", 
+             color = "red", 
+             linewidth = 0.8) +
+  
+  # Línea Vertical (Punto de Detención / Precisión Máxima)
+  geom_vline(xintercept = punto_detencion_x, 
+             linetype = "dotted", 
+             color = "blue", 
+             linewidth = 0.8) +
+  
+  # Gráfico de Línea principal
+  geom_line(color = "darkgreen", linewidth = 1.2) +
+  
+  # Puntos de los datos (la precisión en cada paso)
+  geom_point(color = "darkgreen", size = 3) +
+  
+  # Configuración de Etiquetas y Títulos
+  labs(
+    title = "Evolución de la Precisión CV (Forward Selection)",
+    x = "Número de Variables en el Subconjunto",
+    y = "Accuracy CV"
+  ) +
+  
+  # Ajuste de Escala del Eje Y (siempre bueno incluir 1.0)
+  scale_y_continuous(limits = c(min(0.5, fs_history$Accuracy), 1.05), 
+                     breaks = seq(min(0.5, fs_history$Accuracy), 1.0, by = 0.1)) +
+  
+  # Ajuste de Escala del Eje X (números enteros)
+  scale_x_continuous(breaks = fs_history$Num_Variables, 
+                     limits = c(0.8, max(fs_history$Num_Variables) + 0.2)) +
+  
+  # Tema para mejor presentación
+  theme_minimal()
+
+# Mostrar el gráfico
+print(plot_accuracy_evolution)
