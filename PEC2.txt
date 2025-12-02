@@ -20,6 +20,8 @@ library(dplyr)
 library(stats) # Incluye funciones para chi-cuadrado, PCA y p.adjust (FDR)
 library(factoextra)
 
+# Establecer semilla para reproducibilidad
+set.seed(42)
 
 # ------------------------------------------------------------------------------
 # 2. GENERACIÓN DEL CONJUNTO DE DATOS SINTÉTICO (N=100)
