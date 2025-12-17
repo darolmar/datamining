@@ -237,3 +237,181 @@ cat("2. Balance de clases:",
            "equilibrado", "ligeramente desbalanceado"), "\n")
 cat("3. Imágenes con dimensiones:", paste(unique_dims[[1]][1:2], collapse = "x"), "\n")
 cat("4. Preparado para iniciar modelado\n")
+
+
+# =============================================================================
+# Parte 2: Modelado Progresivo (NET-1 → CNN Avanzadas) - ACTUALIZADO KERAS 3
+# =============================================================================
+
+# =============================================================================
+# 1. CONFIGURACIÓN GLOBAL Y CARGA DE METADATA
+# =============================================================================
+
+metadata <- readRDS("dataset_metadata.rds")
+train_data <- metadata$train
+val_data <- metadata$val
+test_data <- metadata$test
+
+IMG_HEIGHT <- metadata$img_dims[1]
+IMG_WIDTH <- metadata$img_dims[2]
+BATCH_SIZE <- 32
+EPOCHS <- 50
+
+# =============================================================================
+# 2. GENERADORES DE DATOS (VERSION KERAS 3)
+# =============================================================================
+
+# En Keras 3, la normalización y el aumento se definen como capas o funciones del dataset
+normalization_layer <- layer_rescaling(scale = 1/255)
+
+data_augmentation <- keras_model_sequential() %>%
+  layer_random_flip("horizontal_and_vertical") %>%
+  layer_random_rotation(factor = 0.11) %>% 
+  layer_random_translation(height_factor = 0.2, width_factor = 0.2) %>%
+  layer_random_zoom(factor = 0.2)
+
+# Crear Datasets (Sustituye a flow_images_from_directory)
+# Nota: Keras 3 usa el directorio raíz y detecta subcarpetas como clases automáticamente
+full_train_ds <- image_dataset_from_directory(
+  data_dir,
+  label_mode = "binary",
+  color_mode = "grayscale",
+  image_size = c(IMG_HEIGHT, IMG_WIDTH),
+  batch_size = BATCH_SIZE,
+  seed = 123,
+  validation_split = 0.2, # Usamos el split nativo para asegurar compatibilidad
+  subset = "training"
+)
+
+full_val_ds <- image_dataset_from_directory(
+  data_dir,
+  label_mode = "binary",
+  color_mode = "grayscale",
+  image_size = c(IMG_HEIGHT, IMG_WIDTH),
+  batch_size = BATCH_SIZE,
+  seed = 123,
+  validation_split = 0.2,
+  subset = "validation"
+)
+
+# Aplicar transformaciones (Pipeline optimizado)
+train_dataset_no_aug <- full_train_ds %>% 
+  dataset_map(function(x, y) list(normalization_layer(x), y)) %>%
+  dataset_prefetch(buffer_size = tf$data$AUTOTUNE)
+
+train_dataset_aug <- full_train_ds %>% 
+  dataset_map(function(x, y) list(data_augmentation(normalization_layer(x), training = TRUE), y)) %>%
+  dataset_prefetch(buffer_size = tf$data$AUTOTUNE)
+
+validation_dataset <- full_val_ds %>% 
+  dataset_map(function(x, y) list(normalization_layer(x), y)) %>%
+  dataset_prefetch(buffer_size = tf$data$AUTOTUNE)
+
+# =============================================================================
+# 3. VISUALIZAR AUGMENTATION (ACTUALIZADO)
+# =============================================================================
+
+visualize_augmentation <- function(dataset, n_samples = 9) {
+  batch <- dataset %>% dataset_take(1) %>% as_iterator() %>% iter_next()
+  images <- batch[[1]]
+  
+  par(mfrow = c(3, 3), mar = c(1, 1, 2, 1))
+  for(i in 1:min(n_samples, dim(images)[1])) {
+    img_display <- as.array(images[i,,,1])
+    image(t(img_display[nrow(img_display):1,]), 
+          col = gray.colors(256), axes = FALSE,
+          main = paste("Augmented", i))
+  }
+  par(mfrow = c(1, 1))
+}
+
+visualize_augmentation(train_dataset_aug)
+
+# =============================================================================
+# 4. MODELO 1: NET-1 (REGRESIÓN LOGÍSTICA)
+# =============================================================================
+
+model_1 <- keras_model_sequential() %>%
+  layer_flatten(input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+model_1 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
+
+history_1 <- model_1 %>% fit(train_dataset_no_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
+
+save_model(model_1, "model_1_net1.keras")
+
+# =============================================================================
+# 5. MODELO 2: RED CON CAPAS OCULTAS
+# =============================================================================
+
+model_2 <- keras_model_sequential() %>%
+  layer_flatten(input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
+  layer_dense(units = 256, activation = "relu") %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+model_2 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
+
+history_2 <- model_2 %>% fit(train_dataset_no_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
+
+# =============================================================================
+# 6. MODELO 3: CNN BASE (CON AUGMENTATION)
+# =============================================================================
+
+model_3 <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3, 3), activation = "relu", input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
+  layer_max_pooling_2d() %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d() %>%
+  layer_flatten() %>%
+  layer_dense(units = 128, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+model_3 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
+
+history_3 <- model_3 %>% fit(train_dataset_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
+
+# =============================================================================
+# 7. MODELO 4: CNN CON BATCH NORMALIZATION
+# =============================================================================
+
+model_4 <- keras_model_sequential() %>%
+  layer_conv_2d(32, c(3,3), activation = "relu", input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d() %>%
+  layer_flatten() %>%
+  layer_dense(1, activation = "sigmoid")
+
+model_4 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
+
+history_4 <- model_4 %>% fit(train_dataset_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
+
+# =============================================================================
+# 8. MODELO 5: CNN CON GAP
+# =============================================================================
+
+model_5 <- keras_model_sequential() %>%
+  layer_conv_2d(32, c(3,3), activation = "relu", input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
+  layer_global_average_pooling_2d() %>%
+  layer_dense(1, activation = "sigmoid")
+
+model_5 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
+
+history_5 <- model_5 %>% fit(train_dataset_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
+
+# =============================================================================
+# 9. COMPARACIÓN FINAL
+# =============================================================================
+
+results <- data.frame(
+  Modelo = c("NET-1", "MLP", "CNN Base", "CNN + BN", "CNN + GAP"),
+  Val_Accuracy = c(
+    tail(history_1$metrics$val_accuracy, 1),
+    tail(history_2$metrics$val_accuracy, 1),
+    tail(history_3$metrics$val_accuracy, 1),
+    tail(history_4$metrics$val_accuracy, 1),
+    tail(history_5$metrics$val_accuracy, 1)
+  )
+)
+print(results)
