@@ -1,0 +1,239 @@
+# =============================================================================
+# PRÁCTICA 3 - DEEP LEARNING: Clasificación de Granos de Polen
+# Parte 1: Exploración y Análisis Exploratorio del Dataset
+# =============================================================================
+
+# 1. Instalación de paquetes necesarios (incluyendo keras3)
+pacotes <- c("keras3", "tensorflow", "ggplot2", "gridExtra", "dplyr")
+new_packages <- pacotes[!(pacotes %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages, dependencies = TRUE)
+
+# 2. Cargar librerías
+library(keras3)
+library(tensorflow)
+library(ggplot2)
+library(gridExtra)
+library(dplyr, warn.conflicts = FALSE)
+
+# 3. Configuración inicial (Solo si no lo has hecho antes)
+#install_tensorflow()
+
+# Configurar semilla para reproducibilidad
+set.seed(123)
+tensorflow::tf$random$set_seed(123)
+
+# =============================================================================
+# 1. CARGA Y ORGANIZACIÓN DEL DATASET
+# =============================================================================
+
+# Definir rutas al dataset
+# AJUSTAR ESTAS RUTAS SEGÚN TU ESTRUCTURA DE CARPETAS
+# data_dir <- "path/to/your/pollen_dataset"  # Carpeta principal
+data_dir <- "/Users/darolmar/Desktop/anuka1200"  # Carpeta principal
+class_a_dir <- file.path(data_dir, "TipoA_Kunzea")  # Primera especie
+class_b_dir <- file.path(data_dir, "TipoB_Lepto")  # Segunda especie
+
+# Listar archivos de imágenes
+images_class_a <- list.files(class_a_dir, pattern = "\\.(jpg|jpeg|png)$", 
+                             full.names = TRUE, ignore.case = TRUE)
+images_class_b <- list.files(class_b_dir, pattern = "\\.(jpg|jpeg|png)$", 
+                             full.names = TRUE, ignore.case = TRUE)
+
+# Información básica del dataset
+cat("=== INFORMACIÓN DEL DATASET ===\n")
+cat("Imágenes Clase A:", length(images_class_a), "\n")
+cat("Imágenes Clase B:", length(images_class_b), "\n")
+cat("Total de imágenes:", length(images_class_a) + length(images_class_b), "\n")
+cat("Balance de clases:", 
+    round(length(images_class_a) / (length(images_class_a) + length(images_class_b)), 3), "\n\n")
+
+# =============================================================================
+# 2. ANÁLISIS DE DIMENSIONES Y CARACTERÍSTICAS
+# =============================================================================
+
+# Función para cargar una imagen y obtener sus dimensiones
+get_image_info <- function(img_path) {
+  img <- image_load(img_path, color_mode = "grayscale")
+  img_array <- image_to_array(img)
+  return(dim(img_array))
+}
+
+# Muestrear algunas imágenes para verificar dimensiones
+sample_images <- c(head(images_class_a, 5), head(images_class_b, 5))
+dimensions_list <- lapply(sample_images, get_image_info)
+
+cat("=== DIMENSIONES DE LAS IMÁGENES ===\n")
+print(dimensions_list[1:3])
+
+# Verificar si todas tienen las mismas dimensiones
+unique_dims <- unique(dimensions_list)
+cat("\nNúmero de dimensiones únicas:", length(unique_dims), "\n")
+if(length(unique_dims) == 1) {
+  cat("✓ Todas las imágenes tienen dimensiones consistentes:", 
+      paste(unique_dims[[1]], collapse = " x "), "\n\n")
+} else {
+  cat("⚠ ADVERTENCIA: Las imágenes tienen dimensiones variables\n")
+  cat("Se requerirá redimensionamiento\n\n")
+}
+
+# =============================================================================
+# 3. VISUALIZACIÓN DE MUESTRAS REPRESENTATIVAS
+# =============================================================================
+
+# Función para visualizar imágenes
+plot_sample_images <- function(image_paths, class_name, n_samples = 6) {
+  par(mfrow = c(2, 3), mar = c(1, 1, 2, 1))
+  
+  sample_indices <- sample(1:length(image_paths), min(n_samples, length(image_paths)))
+  
+  for(i in sample_indices) {
+    img <- image_load(image_paths[i], color_mode = "grayscale", target_size = c(150, 150))
+    img_array <- image_to_array(img)
+    img_array <- img_array / 255  # Normalizar para visualización
+    
+    # Convertir a formato para plot
+    img_matrix <- img_array[,,1]
+    
+    image(t(img_matrix[nrow(img_matrix):1,]), 
+          col = gray.colors(256),
+          axes = FALSE,
+          main = paste(class_name, "-", i))
+  }
+  par(mfrow = c(1, 1))
+}
+
+cat("=== VISUALIZACIÓN DE MUESTRAS ===\n")
+cat("Generando visualizaciones...\n\n")
+
+# Visualizar Clase A
+plot_sample_images(images_class_a, "Clase A", 6)
+# Visualizar Clase B  
+plot_sample_images(images_class_b, "Clase B", 6)
+
+# =============================================================================
+# 4. ANÁLISIS ESTADÍSTICO DE INTENSIDAD DE PÍXELES
+# =============================================================================
+
+# Función para calcular estadísticas de una imagen
+get_pixel_stats <- function(img_path) {
+  img <- image_load(img_path, color_mode = "grayscale", target_size = c(150, 150))
+  img_array <- image_to_array(img) / 255
+  
+  return(data.frame(
+    mean_intensity = mean(img_array),
+    sd_intensity = sd(img_array),
+    min_intensity = min(img_array),
+    max_intensity = max(img_array)
+  ))
+}
+
+# Calcular estadísticas para una muestra de cada clase
+n_sample <- min(50, length(images_class_a), length(images_class_b))
+
+cat("=== ANÁLISIS DE INTENSIDAD DE PÍXELES ===\n")
+cat("Calculando estadísticas para", n_sample, "imágenes por clase...\n")
+
+stats_a <- do.call(rbind, lapply(head(images_class_a, n_sample), get_pixel_stats))
+stats_a$class <- "A"
+
+stats_b <- do.call(rbind, lapply(head(images_class_b, n_sample), get_pixel_stats))
+stats_b$class <- "B"
+
+stats_combined <- rbind(stats_a, stats_b)
+
+# Resumen estadístico por clase
+cat("\nClase A - Estadísticas de intensidad:\n")
+print(summary(stats_a[, 1:4]))
+
+cat("\nClase B - Estadísticas de intensidad:\n")
+print(summary(stats_b[, 1:4]))
+
+# Visualización comparativa
+p1 <- ggplot(stats_combined, aes(x = class, y = mean_intensity, fill = class)) +
+  geom_boxplot() +
+  labs(title = "Distribución de Intensidad Media por Clase",
+       x = "Clase", y = "Intensidad Media") +
+  theme_minimal() +
+  scale_fill_manual(values = c("A" = "steelblue", "B" = "coral"))
+
+p2 <- ggplot(stats_combined, aes(x = class, y = sd_intensity, fill = class)) +
+  geom_boxplot() +
+  labs(title = "Distribución de Desviación Estándar por Clase",
+       x = "Clase", y = "Desviación Estándar") +
+  theme_minimal() +
+  scale_fill_manual(values = c("A" = "steelblue", "B" = "coral"))
+
+grid.arrange(p1, p2, ncol = 2)
+
+# =============================================================================
+# 5. PREPARACIÓN DE METADATOS PARA MODELADO
+# =============================================================================
+
+# Crear dataframe con todas las rutas y etiquetas
+all_images <- c(images_class_a, images_class_b)
+all_labels <- c(rep(0, length(images_class_a)), 
+                rep(1, length(images_class_b)))
+
+metadata <- data.frame(
+  image_path = all_images,
+  label = all_labels,
+  class_name = ifelse(all_labels == 0, "Clase_A", "Clase_B"),
+  stringsAsFactors = FALSE
+)
+
+# Mezclar aleatoriamente
+set.seed(123)
+metadata <- metadata[sample(nrow(metadata)), ]
+
+cat("\n=== METADATA PREPARADO ===\n")
+cat("Total de imágenes procesadas:", nrow(metadata), "\n")
+cat("Distribución de etiquetas:\n")
+print(table(metadata$class_name))
+
+# =============================================================================
+# 6. DIVISIÓN EN CONJUNTOS DE ENTRENAMIENTO, VALIDACIÓN Y TEST
+# =============================================================================
+
+# Proporción: 70% train, 15% validation, 15% test
+n_total <- nrow(metadata)
+n_train <- floor(0.70 * n_total)
+n_val <- floor(0.15 * n_total)
+n_test <- n_total - n_train - n_val
+
+train_data <- metadata[1:n_train, ]
+val_data <- metadata[(n_train + 1):(n_train + n_val), ]
+test_data <- metadata[(n_train + n_val + 1):n_total, ]
+
+cat("\n=== DIVISIÓN DE DATOS ===\n")
+cat("Entrenamiento:", nrow(train_data), "imágenes\n")
+cat("Validación:", nrow(val_data), "imágenes\n")
+cat("Test:", nrow(test_data), "imágenes\n\n")
+
+# Verificar balance en cada conjunto
+cat("Balance en conjunto de entrenamiento:\n")
+print(prop.table(table(train_data$class_name)))
+cat("\nBalance en conjunto de validación:\n")
+print(prop.table(table(val_data$class_name)))
+cat("\nBalance en conjunto de test:\n")
+print(prop.table(table(test_data$class_name)))
+
+# =============================================================================
+# 7. GUARDAR RESULTADOS DE LA EXPLORACIÓN
+# =============================================================================
+
+# Guardar metadata para uso posterior
+saveRDS(list(
+  train = train_data,
+  val = val_data,
+  test = test_data,
+  img_dims = unique_dims[[1]]
+), "dataset_metadata.rds")
+
+cat("\n✓ Exploración completada. Metadata guardado en 'dataset_metadata.rds'\n")
+cat("\n=== CONCLUSIONES DE LA EXPLORACIÓN ===\n")
+cat("1. Dataset con", n_total, "imágenes en escala de grises\n")
+cat("2. Balance de clases:", 
+    ifelse(abs(length(images_class_a) - length(images_class_b)) < 10, 
+           "equilibrado", "ligeramente desbalanceado"), "\n")
+cat("3. Imágenes con dimensiones:", paste(unique_dims[[1]][1:2], collapse = "x"), "\n")
+cat("4. Preparado para iniciar modelado\n")
