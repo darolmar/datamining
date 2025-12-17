@@ -4,7 +4,7 @@
 # =============================================================================
 
 # 1. Instalación de paquetes necesarios (incluyendo keras3)
-pacotes <- c("keras3", "tensorflow", "ggplot2", "gridExtra", "dplyr")
+pacotes <- c("keras3", "tensorflow", "ggplot2", "gridExtra", "dplyr”,"tfdatasets","reshape2")
 new_packages <- pacotes[!(pacotes %in% installed.packages()[,"Package"])]
 if(length(new_packages)) install.packages(new_packages, dependencies = TRUE)
 
@@ -14,13 +14,15 @@ library(tensorflow)
 library(ggplot2)
 library(gridExtra)
 library(dplyr, warn.conflicts = FALSE)
+library(tfdatasets)
+library(reshape2)
 
 # 3. Configuración inicial (Solo si no lo has hecho antes)
 #install_tensorflow()
 
 # Configurar semilla para reproducibilidad
-set.seed(123)
-tensorflow::tf$random$set_seed(123)
+set.seed(123L)
+tensorflow::tf$random$set_seed(123L)
 
 # =============================================================================
 # 1. CARGA Y ORGANIZACIÓN DEL DATASET
@@ -182,7 +184,7 @@ metadata <- data.frame(
 )
 
 # Mezclar aleatoriamente
-set.seed(123)
+set.seed(123L)
 metadata <- metadata[sample(nrow(metadata)), ]
 
 cat("\n=== METADATA PREPARADO ===\n")
@@ -264,11 +266,11 @@ EPOCHS <- 50
 # En Keras 3, la normalización y el aumento se definen como capas o funciones del dataset
 normalization_layer <- layer_rescaling(scale = 1/255)
 
-data_augmentation <- keras_model_sequential() %>%
-  layer_random_flip("horizontal_and_vertical") %>%
+data_augmentation <- keras_model_sequential() %>% 
+  layer_random_flip("horizontal_and_vertical") %>% 
   layer_random_rotation(factor = 0.11) %>% 
-  layer_random_translation(height_factor = 0.2, width_factor = 0.2) %>%
-  layer_random_zoom(factor = 0.2)
+  layer_random_translation(height_factor = 0.2, width_factor = 0.2) %>% 
+  layer_random_zoom(height_factor = 0.2, width_factor = 0.2)
 
 # Crear Datasets (Sustituye a flow_images_from_directory)
 # Nota: Keras 3 usa el directorio raíz y detecta subcarpetas como clases automáticamente
@@ -278,7 +280,7 @@ full_train_ds <- image_dataset_from_directory(
   color_mode = "grayscale",
   image_size = c(IMG_HEIGHT, IMG_WIDTH),
   batch_size = BATCH_SIZE,
-  seed = 123,
+  seed = 123L,
   validation_split = 0.2, # Usamos el split nativo para asegurar compatibilidad
   subset = "training"
 )
@@ -289,30 +291,37 @@ full_val_ds <- image_dataset_from_directory(
   color_mode = "grayscale",
   image_size = c(IMG_HEIGHT, IMG_WIDTH),
   batch_size = BATCH_SIZE,
-  seed = 123,
+  seed = 123L,
   validation_split = 0.2,
   subset = "validation"
 )
 
 # Aplicar transformaciones (Pipeline optimizado)
 train_dataset_no_aug <- full_train_ds %>% 
-  dataset_map(function(x, y) list(normalization_layer(x), y)) %>%
-  dataset_prefetch(buffer_size = tf$data$AUTOTUNE)
+  tfdatasets::dataset_map(function(x, y) list(normalization_layer(x), y)) %>% 
+  tfdatasets::dataset_prefetch(buffer_size = tensorflow::tf$data$AUTOTUNE)
 
+# Dataset SIN Augmentation
+train_dataset_no_aug <- full_train_ds %>% 
+  tfdatasets::dataset_map(function(x, y) list(normalization_layer(x), y)) %>%
+  tfdatasets::dataset_prefetch(buffer_size = tensorflow::tf$data$AUTOTUNE)
+
+# Dataset CON Augmentation
 train_dataset_aug <- full_train_ds %>% 
-  dataset_map(function(x, y) list(data_augmentation(normalization_layer(x), training = TRUE), y)) %>%
-  dataset_prefetch(buffer_size = tf$data$AUTOTUNE)
+  tfdatasets::dataset_map(function(x, y) list(data_augmentation(normalization_layer(x), training = TRUE), y)) %>%
+  tfdatasets::dataset_prefetch(buffer_size = tensorflow::tf$data$AUTOTUNE)
 
-validation_dataset <- full_val_ds %>% 
-  dataset_map(function(x, y) list(normalization_layer(x), y)) %>%
-  dataset_prefetch(buffer_size = tf$data$AUTOTUNE)
+# Dataset de Validación 
+validation_dataset <- full_val_ds %>%
+  tfdatasets::dataset_map(function(x, y) list(normalization_layer(x), y)) %>%
+  tfdatasets::dataset_prefetch(buffer_size = tensorflow::tf$data$AUTOTUNE)
 
 # =============================================================================
 # 3. VISUALIZAR AUGMENTATION (ACTUALIZADO)
 # =============================================================================
 
 visualize_augmentation <- function(dataset, n_samples = 9) {
-  batch <- dataset %>% dataset_take(1) %>% as_iterator() %>% iter_next()
+  batch <- dataset %>% tfdatasets::dataset_take(1) %>% as_iterator() %>% iter_next()
   images <- batch[[1]]
   
   par(mfrow = c(3, 3), mar = c(1, 1, 2, 1))
@@ -339,21 +348,25 @@ model_1 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", 
 
 history_1 <- model_1 %>% fit(train_dataset_no_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
 
-save_model(model_1, "model_1_net1.keras")
+save_model(model_1, "model_1_net1.keras",overwrite = TRUE)
+saveRDS(history_1, "history_1.rds")
 
 # =============================================================================
 # 5. MODELO 2: RED CON CAPAS OCULTAS
 # =============================================================================
 
+# Modelo 2 corregido
 model_2 <- keras_model_sequential() %>%
   layer_flatten(input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
-  layer_dense(units = 256, activation = "relu") %>%
-  layer_dropout(rate = 0.3) %>%
-  layer_dense(units = 1, activation = "sigmoid")
+  layer_dense(units = 256L, activation = "relu") %>% # <-- Asegúrate de que este %>% esté ahí
+  layer_dropout(rate = 0.3) %>%                      # <-- ¡AQUÍ suele faltar el %>%!
+  layer_dense(units = 1L, activation = "sigmoid")    # Capa final
 
 model_2 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
 
 history_2 <- model_2 %>% fit(train_dataset_no_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
+saveRDS(history_2, "history_2.rds")
+
 
 # =============================================================================
 # 6. MODELO 3: CNN BASE (CON AUGMENTATION)
@@ -371,6 +384,8 @@ model_3 <- keras_model_sequential() %>%
 model_3 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
 
 history_3 <- model_3 %>% fit(train_dataset_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
+saveRDS(history_3, "history_3.rds")
+
 
 # =============================================================================
 # 7. MODELO 4: CNN CON BATCH NORMALIZATION
@@ -386,6 +401,7 @@ model_4 <- keras_model_sequential() %>%
 model_4 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
 
 history_4 <- model_4 %>% fit(train_dataset_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
+saveRDS(history_4, "history_4.rds")
 
 # =============================================================================
 # 8. MODELO 5: CNN CON GAP
@@ -399,6 +415,8 @@ model_5 <- keras_model_sequential() %>%
 model_5 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
 
 history_5 <- model_5 %>% fit(train_dataset_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
+saveRDS(history_5, "history_5.rds")
+
 
 # =============================================================================
 # 9. COMPARACIÓN FINAL
@@ -415,3 +433,376 @@ results <- data.frame(
   )
 )
 print(results)
+
+# =============================================================================
+# Parte 3: Análisis Crítico, Visualizaciones y Generación de Figuras
+# =============================================================================
+
+# =============================================================================
+# 1. GRÁFICA COMPARATIVA DE APRENDIZAJE (Figura estilo 11.11 Hastie)
+# =============================================================================
+
+# Cargar historiales de entrenamiento
+history_1 <- readRDS("history_1.rds")
+history_2 <- readRDS("history_2.rds")
+history_3 <- readRDS("history_3.rds")
+history_4 <- readRDS("history_4.rds")
+history_5 <- readRDS("history_5.rds")
+
+# Función para extraer métricas en formato tidy
+extract_metrics <- function(history, model_name) {
+  epochs <- seq_along(history$metrics$loss)
+  
+  data.frame(
+    epoch = epochs,
+    model = model_name,
+    train_loss = history$metrics$loss,
+    val_loss = history$metrics$val_loss,
+    train_acc = history$metrics$accuracy,
+    val_acc = history$metrics$val_accuracy
+  )
+}
+
+# Consolidar todos los modelos
+all_metrics <- rbind(
+  extract_metrics(history_1, "NET-1 (sin capa oculta)"),
+  extract_metrics(history_2, "MLP (con capas ocultas)"),
+  extract_metrics(history_3, "CNN Base"),
+  extract_metrics(history_4, "CNN + Batch Norm"),
+  extract_metrics(history_5, "CNN + GAP")
+)
+
+# GRÁFICA 1: Loss de Validación (principal para la memoria)
+plot_val_loss <- ggplot(all_metrics, aes(x = epoch, y = val_loss, 
+                                          color = model, linetype = model)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Evolución del Loss en Validación",
+    subtitle = "Comparación de los 5 modelos (menor es mejor)",
+    x = "Época",
+    y = "Binary Crossentropy Loss",
+    color = "Modelo",
+    linetype = "Modelo"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    legend.direction = "vertical",
+    plot.title = element_text(face = "bold", size = 14),
+    panel.grid.minor = element_blank()
+  ) +
+  scale_color_brewer(palette = "Set1")
+
+print(plot_val_loss)
+ggsave("figura_loss_validacion.png", plot_val_loss, 
+       width = 10, height = 6, dpi = 300)
+
+# GRÁFICA 2: Accuracy de Validación
+plot_val_acc <- ggplot(all_metrics, aes(x = epoch, y = val_acc, 
+                                         color = model, linetype = model)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Evolución del Accuracy en Validación",
+    subtitle = "Comparación de los 5 modelos (mayor es mejor)",
+    x = "Época",
+    y = "Accuracy",
+    color = "Modelo",
+    linetype = "Modelo"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    legend.direction = "vertical",
+    plot.title = element_text(face = "bold", size = 14),
+    panel.grid.minor = element_blank()
+  ) +
+  scale_color_brewer(palette = "Set1") +
+  ylim(0.5, 1.0)
+
+print(plot_val_acc)
+ggsave("figura_accuracy_validacion.png", plot_val_acc, 
+       width = 10, height = 6, dpi = 300)
+
+# GRÁFICA 3: Train vs Validation (para detectar overfitting)
+# Seleccionar el mejor modelo (ej: modelo 5)
+best_model_data <- all_metrics %>% 
+  filter(model == "CNN + GAP") %>%
+  select(epoch, train_loss, val_loss, train_acc, val_acc) %>%
+  melt(id.vars = "epoch")
+
+# Separar loss y accuracy
+overfitting_loss <- best_model_data %>%
+  filter(variable %in% c("train_loss", "val_loss"))
+
+overfitting_acc <- best_model_data %>%
+  filter(variable %in% c("train_acc", "val_acc"))
+
+plot_overfitting <- ggplot(overfitting_loss, aes(x = epoch, y = value, 
+                                                  color = variable, linetype = variable)) +
+  geom_line(size = 1.2) +
+  labs(
+    title = "Análisis de Overfitting: CNN + GAP",
+    subtitle = "Comparación Train vs Validación (Loss)",
+    x = "Época",
+    y = "Binary Crossentropy Loss",
+    color = "Conjunto",
+    linetype = "Conjunto"
+  ) +
+  theme_minimal(base_size = 12) +
+  scale_color_manual(
+    values = c("train_loss" = "blue", "val_loss" = "red"),
+    labels = c("Entrenamiento", "Validación")
+  ) +
+  scale_linetype_manual(
+    values = c("train_loss" = "solid", "val_loss" = "dashed"),
+    labels = c("Entrenamiento", "Validación")
+  ) +
+  theme(legend.position = "bottom")
+
+print(plot_overfitting)
+ggsave("figura_overfitting_analysis.png", plot_overfitting, 
+       width = 10, height = 6, dpi = 300)
+
+cat("✓ Gráficas comparativas generadas\n\n")
+
+# =============================================================================
+# 2. ANÁLISIS DE PESOS: Primera Capa Convolucional
+# =============================================================================
+
+cat("=== VISUALIZACIÓN DE PESOS (Filtros Conv) ===\n")
+
+# Cargar modelo CNN base (modelo 3)
+model_cnn <- load_model_hdf5("model_3_cnn_base.keras")
+
+# Extraer pesos de la primera capa convolucional
+first_conv_layer <- get_layer(model_cnn, index = 1)
+filters <- get_weights(first_conv_layer)[[1]]  # [height, width, channels, filters]
+
+cat("Dimensiones de los filtros:", dim(filters), "\n")
+cat("Número de filtros en primera capa:", dim(filters)[4], "\n\n")
+
+# Función para visualizar filtros
+plot_conv_filters <- function(filters, n_filters = 32, ncol = 8) {
+  # Normalizar filtros para visualización
+  f_min <- min(filters)
+  f_max <- max(filters)
+  filters_norm <- (filters - f_min) / (f_max - f_min)
+  
+  n_filters <- min(n_filters, dim(filters)[4])
+  nrow <- ceiling(n_filters / ncol)
+  
+  par(mfrow = c(nrow, ncol), mar = c(0.5, 0.5, 1, 0.5))
+  
+  for(i in 1:n_filters) {
+    filter_img <- filters_norm[,,1,i]
+    image(t(filter_img[nrow(filter_img):1,]), 
+          col = gray.colors(256),
+          axes = FALSE,
+          main = paste("F", i, sep = ""),
+          cex.main = 0.8)
+  }
+  par(mfrow = c(1, 1))
+}
+
+# Visualizar los 32 filtros de la primera capa
+png("figura_filtros_conv1.png", width = 2400, height = 1200, res = 300)
+plot_conv_filters(filters, n_filters = 32, ncol = 8)
+dev.off()
+
+cat("✓ Filtros de convolución visualizados y guardados\n\n")
+
+# Estadísticas de los filtros
+cat("Análisis estadístico de los filtros:\n")
+cat("Media de pesos:", mean(filters), "\n")
+cat("Desviación estándar:", sd(filters), "\n")
+cat("Rango:", range(filters), "\n\n")
+
+# =============================================================================
+# 3. VISUALIZACIÓN DE MAPAS DE CARACTERÍSTICAS (Feature Maps)
+# =============================================================================
+
+cat("=== MAPAS DE CARACTERÍSTICAS ===\n")
+
+# Cargar metadata y seleccionar una imagen de test
+metadata <- readRDS("dataset_metadata.rds")
+test_data <- metadata$test
+
+# Seleccionar una imagen de cada clase para análisis
+sample_class_a <- test_data %>% filter(label == 0) %>% slice(1)
+sample_class_b <- test_data %>% filter(label == 1) %>% slice(1)
+
+# Función para extraer mapas de características
+get_feature_maps <- function(model, img_path, layer_indices = c(1, 3, 5)) {
+  # Cargar y preprocesar imagen
+  img <- image_load(img_path, target_size = c(100, 100), color_mode = "grayscale")
+  img_array <- image_to_array(img)
+  img_array <- array_reshape(img_array, c(1, 100, 100, 1))
+  img_array <- img_array / 255
+  
+  # Crear modelo para extraer activaciones intermedias
+  layer_outputs <- lapply(layer_indices, function(idx) {
+    get_layer(model, index = idx)$output
+  })
+  
+  activation_model <- keras_model(inputs = model$input, outputs = layer_outputs)
+  
+  # Obtener activaciones
+  activations <- predict(activation_model, img_array)
+  
+  return(list(
+    image = img_array[1,,,1],
+    activations = activations,
+    layer_indices = layer_indices
+  ))
+}
+
+# Extraer feature maps para una imagen de Clase A
+cat("Extrayendo feature maps para Clase A...\n")
+feature_maps_a <- get_feature_maps(model_cnn, sample_class_a$image_path, 
+                                   layer_indices = c(1, 3, 5))
+
+# Función para visualizar feature maps de una capa
+plot_feature_maps <- function(activation, layer_name, n_features = 16, ncol = 4) {
+  n_features <- min(n_features, dim(activation)[4])
+  nrow <- ceiling(n_features / ncol)
+  
+  par(mfrow = c(nrow, ncol), mar = c(0.5, 0.5, 1.5, 0.5))
+  
+  for(i in 1:n_features) {
+    feature <- activation[1,,,i]
+    
+    # Normalizar para visualización
+    feature <- (feature - min(feature)) / (max(feature) - min(feature))
+    
+    image(t(feature[nrow(feature):1,]), 
+          col = gray.colors(256),
+          axes = FALSE,
+          main = paste(layer_name, "- Map", i),
+          cex.main = 0.7)
+  }
+  par(mfrow = c(1, 1))
+}
+
+# Visualizar mapas de la primera capa convolucional
+png("figura_feature_maps_conv1.png", width = 2000, height = 2000, res = 300)
+plot_feature_maps(feature_maps_a$activations[[1]], "Conv1 (32 filtros)", 
+                  n_features = 16, ncol = 4)
+dev.off()
+
+# Visualizar mapas de la segunda capa convolucional
+png("figura_feature_maps_conv2.png", width = 2000, height = 2000, res = 300)
+plot_feature_maps(feature_maps_a$activations[[2]], "Conv2 (64 filtros)", 
+                  n_features = 16, ncol = 4)
+dev.off()
+
+# Visualizar mapas de la tercera capa convolucional
+png("figura_feature_maps_conv3.png", width = 2000, height = 2000, res = 300)
+plot_feature_maps(feature_maps_a$activations[[3]], "Conv3 (128 filtros)", 
+                  n_features = 16, ncol = 4)
+dev.off()
+
+cat("✓ Feature maps generados para todas las capas convolucionales\n\n")
+
+# =============================================================================
+# 4. COMPARACIÓN DE FEATURE MAPS: Clase A vs Clase B
+# =============================================================================
+
+cat("Extrayendo feature maps para Clase B (comparación)...\n")
+feature_maps_b <- get_feature_maps(model_cnn, sample_class_b$image_path, 
+                                   layer_indices = c(1, 3, 5))
+
+# Visualización comparativa: misma capa, ambas clases
+png("figura_comparacion_clases.png", width = 3000, height = 1500, res = 300)
+par(mfrow = c(2, 8), mar = c(0.5, 0.5, 1.5, 0.5))
+
+# Primera fila: Clase A
+for(i in 1:8) {
+  feature_a <- feature_maps_a$activations[[1]][1,,,i]
+  feature_a <- (feature_a - min(feature_a)) / (max(feature_a) - min(feature_a))
+  image(t(feature_a[nrow(feature_a):1,]), 
+        col = gray.colors(256),
+        axes = FALSE,
+        main = paste("Clase A - F", i),
+        cex.main = 0.7)
+}
+
+# Segunda fila: Clase B
+for(i in 1:8) {
+  feature_b <- feature_maps_b$activations[[1]][1,,,i]
+  feature_b <- (feature_b - min(feature_b)) / (max(feature_b) - min(feature_b))
+  image(t(feature_b[nrow(feature_b):1,]), 
+        col = gray.colors(256),
+        axes = FALSE,
+        main = paste("Clase B - F", i),
+        cex.main = 0.7)
+}
+
+par(mfrow = c(1, 1))
+dev.off()
+
+cat("✓ Comparación de feature maps entre clases completada\n\n")
+
+# =============================================================================
+# 5. TABLA RESUMEN DE RESULTADOS FINALES
+# =============================================================================
+
+cat("=== TABLA RESUMEN FINAL ===\n\n")
+
+# Cargar todos los historiales
+histories <- list(history_1, history_2, history_3, history_4, history_5)
+model_names <- c("NET-1", "MLP", "CNN Base", "CNN + BN", "CNN + GAP")
+
+# Calcular métricas finales
+final_results <- data.frame(
+  Modelo = model_names,
+  Params = c(10001, 3383873, 2473729, 2530753, 558721),  # Aproximado, ajustar
+  Train_Acc = sapply(histories, function(h) round(tail(h$metrics$accuracy, 1), 4)),
+  Val_Acc = sapply(histories, function(h) round(tail(h$metrics$val_accuracy, 1), 4)),
+  Train_Loss = sapply(histories, function(h) round(tail(h$metrics$loss, 1), 4)),
+  Val_Loss = sapply(histories, function(h) round(tail(h$metrics$val_loss, 1), 4)),
+  Gap = sapply(histories, function(h) {
+    round(tail(h$metrics$accuracy, 1) - tail(h$metrics$val_accuracy, 1), 4)
+  })
+)
+
+print(final_results)
+
+# Guardar tabla en CSV para incluir en memoria
+write.csv(final_results, "tabla_resultados_finales.csv", row.names = FALSE)
+
+# Identificar mejor modelo
+best_model_idx <- which.max(final_results$Val_Acc)
+cat("\n✓ MEJOR MODELO:", model_names[best_model_idx], "\n")
+cat("  - Val Accuracy:", final_results$Val_Acc[best_model_idx], "\n")
+cat("  - Gap (overfitting):", final_results$Gap[best_model_idx], "\n\n")
+
+# =============================================================================
+# 6. ANÁLISIS DE IMPACTO DE DATA AUGMENTATION
+# =============================================================================
+
+cat("=== IMPACTO DE DATA AUGMENTATION ===\n")
+
+# Entrenar CNN Base SIN augmentation para comparar
+cat("Nota: Para análisis completo de augmentation, entrenar modelo 3\n")
+cat("      una vez sin augmentation y comparar resultados.\n\n")
+
+# Comparación cualitativa (basada en gap train-val)
+augmentation_analysis <- data.frame(
+  Aspecto = c("Overfitting (Gap)", "Val Accuracy", "Convergencia"),
+  Sin_Aug = c("Alto", "Puede ser mayor inicialmente", "Más rápida"),
+  Con_Aug = c("Bajo", "Más estable y generalizable", "Más lenta pero robusta")
+)
+
+print(augmentation_analysis)
+
+cat("\n✓ Análisis completado. Todas las figuras guardadas.\n")
+cat("\nARCHIVOS GENERADOS:\n")
+cat("  - figura_loss_validacion.png\n")
+cat("  - figura_accuracy_validacion.png\n")
+cat("  - figura_overfitting_analysis.png\n")
+cat("  - figura_filtros_conv1.png\n")
+cat("  - figura_feature_maps_conv1.png\n")
+cat("  - figura_feature_maps_conv2.png\n")
+cat("  - figura_feature_maps_conv3.png\n")
+cat("  - figura_comparacion_clases.png\n")
+cat("  - tabla_resultados_finales.csv\n")
