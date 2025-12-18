@@ -4,7 +4,7 @@
 # =============================================================================
 
 # 1. Instalación de paquetes necesarios (incluyendo keras3)
-pacotes <- c("keras3", "tensorflow", "ggplot2", "gridExtra", "dplyr”,"tfdatasets","reshape2")
+pacotes <- c("keras3", "tensorflow", "ggplot2", "gridExtra", "dplyr","tfdatasets","reshape2")
 new_packages <- pacotes[!(pacotes %in% installed.packages()[,"Package"])]
 if(length(new_packages)) install.packages(new_packages, dependencies = TRUE)
 
@@ -229,7 +229,7 @@ saveRDS(list(
   val = val_data,
   test = test_data,
   img_dims = unique_dims[[1]]
-), "dataset_metadata.rds")
+), file.path(data_dir, "dataset_metadata.rds"))
 
 cat("\n✓ Exploración completada. Metadata guardado en 'dataset_metadata.rds'\n")
 cat("\n=== CONCLUSIONES DE LA EXPLORACIÓN ===\n")
@@ -249,15 +249,15 @@ cat("4. Preparado para iniciar modelado\n")
 # 1. CONFIGURACIÓN GLOBAL Y CARGA DE METADATA
 # =============================================================================
 
-metadata <- readRDS("dataset_metadata.rds")
+metadata <- readRDS(file.path(data_dir,"dataset_metadata.rds"))
 train_data <- metadata$train
 val_data <- metadata$val
 test_data <- metadata$test
 
-IMG_HEIGHT <- metadata$img_dims[1]
-IMG_WIDTH <- metadata$img_dims[2]
-BATCH_SIZE <- 32
-EPOCHS <- 50
+IMG_HEIGHT <- if(!is.null(metadata$img_dims[1])) as.integer(metadata$img_dims[1]) else 100L
+IMG_WIDTH  <- if(!is.null(metadata$img_dims[2])) as.integer(metadata$img_dims[2]) else 100L
+BATCH_SIZE <- 32L
+EPOCHS <- 50L
 
 # =============================================================================
 # 2. GENERADORES DE DATOS (VERSION KERAS 3)
@@ -266,13 +266,36 @@ EPOCHS <- 50
 # En Keras 3, la normalización y el aumento se definen como capas o funciones del dataset
 normalization_layer <- layer_rescaling(scale = 1/255)
 
-data_augmentation <- keras_model_sequential() %>% 
-  layer_random_flip("horizontal_and_vertical") %>% 
-  layer_random_rotation(factor = 0.11) %>% 
-  layer_random_translation(height_factor = 0.2, width_factor = 0.2) %>% 
-  layer_random_zoom(height_factor = 0.2, width_factor = 0.2)
+# Definición del modelo usando una lista de capas
+model <- keras_model_sequential(layers = list(
+  # 1. Capa de entrada y normalización integrada
+  layer_rescaling(scale = 1/255, input_shape = c(100L, 100L, 1L)),
+  
+  # 2. Primera capa convolucional
+  layer_conv_2d(filters = 32L, kernel_size = c(3L, 3L), activation = "relu"),
+  layer_max_pooling_2d(pool_size = c(2L, 2L)),
+  
+  # 3. Segunda capa convolucional
+  layer_conv_2d(filters = 64L, kernel_size = c(3L, 3L), activation = "relu"),
+  layer_max_pooling_2d(pool_size = c(2L, 2L)),
+  
+  # 4. Aplanado y capas densas
+  layer_flatten(),
+  layer_dense(units = 64L, activation = "relu"),
+  layer_dense(units = 1L, activation = "sigmoid") # Sigmoid para clasificación binaria
+))
 
-# Crear Datasets (Sustituye a flow_images_from_directory)
+# Ver el resumen del modelo para confirmar que todo está bien
+summary(model)
+
+data_augmentation <- keras_model_sequential(layers = list(
+  layer_random_flip(mode = "horizontal_and_vertical"),
+  layer_random_rotation(factor = 0.11),
+  layer_random_translation(height_factor = 0.2, width_factor = 0.2),
+  layer_random_zoom(height_factor = 0.2, width_factor = 0.2)
+))
+
+# Crear Datasets
 # Nota: Keras 3 usa el directorio raíz y detecta subcarpetas como clases automáticamente
 full_train_ds <- image_dataset_from_directory(
   data_dir,
@@ -348,8 +371,9 @@ model_1 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", 
 
 history_1 <- model_1 %>% fit(train_dataset_no_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
 
-save_model(model_1, "model_1_net1.keras",overwrite = TRUE)
-saveRDS(history_1, "history_1.rds")
+save_model(model_1, file.path(data_dir, "model_1_net1.keras"), overwrite = TRUE)
+saveRDS(history_1, file.path(data_dir, "history_1.rds"))
+
 
 # =============================================================================
 # 5. MODELO 2: RED CON CAPAS OCULTAS
@@ -365,7 +389,9 @@ model_2 <- keras_model_sequential() %>%
 model_2 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
 
 history_2 <- model_2 %>% fit(train_dataset_no_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
-saveRDS(history_2, "history_2.rds")
+
+saveRDS(history_2, file.path(data_dir, "history_2.rds"))
+
 
 
 # =============================================================================
@@ -382,9 +408,11 @@ model_3 <- keras_model_sequential() %>%
   layer_dense(units = 1, activation = "sigmoid")
 
 model_3 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
+save_model(model_3, file.path(data_dir, "model_3_cnn_base.keras"), overwrite = TRUE)
 
 history_3 <- model_3 %>% fit(train_dataset_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
-saveRDS(history_3, "history_3.rds")
+saveRDS(history_3, file.path(data_dir, "history_3.rds"))
+
 
 
 # =============================================================================
@@ -401,7 +429,8 @@ model_4 <- keras_model_sequential() %>%
 model_4 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
 
 history_4 <- model_4 %>% fit(train_dataset_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
-saveRDS(history_4, "history_4.rds")
+saveRDS(history_4, file.path(data_dir, "history_4.rds"))
+
 
 # =============================================================================
 # 8. MODELO 5: CNN CON GAP
@@ -415,7 +444,8 @@ model_5 <- keras_model_sequential() %>%
 model_5 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
 
 history_5 <- model_5 %>% fit(train_dataset_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
-saveRDS(history_5, "history_5.rds")
+saveRDS(history_5, file.path(data_dir, "history_5.rds"))
+
 
 
 # =============================================================================
@@ -443,11 +473,11 @@ print(results)
 # =============================================================================
 
 # Cargar historiales de entrenamiento
-history_1 <- readRDS("history_1.rds")
-history_2 <- readRDS("history_2.rds")
-history_3 <- readRDS("history_3.rds")
-history_4 <- readRDS("history_4.rds")
-history_5 <- readRDS("history_5.rds")
+history_1 <- readRDS(file.path(data_dir,"history_1.rds"))
+history_2 <- readRDS(file.path(data_dir,"history_2.rds"))
+history_3 <- readRDS(file.path(data_dir,"history_3.rds"))
+history_4 <- readRDS(file.path(data_dir,"history_4.rds"))
+history_5 <- readRDS(file.path(data_dir,"history_5.rds"))
 
 # Función para extraer métricas en formato tidy
 extract_metrics <- function(history, model_name) {
@@ -494,8 +524,7 @@ plot_val_loss <- ggplot(all_metrics, aes(x = epoch, y = val_loss,
   scale_color_brewer(palette = "Set1")
 
 print(plot_val_loss)
-ggsave("figura_loss_validacion.png", plot_val_loss, 
-       width = 10, height = 6, dpi = 300)
+ggsave( filename = file.path(data_dir, "figura_loss_validacion.png"), plot = plot_val_loss, width = 10, height = 6, dpi = 300 )
 
 # GRÁFICA 2: Accuracy de Validación
 plot_val_acc <- ggplot(all_metrics, aes(x = epoch, y = val_acc, 
@@ -520,8 +549,7 @@ plot_val_acc <- ggplot(all_metrics, aes(x = epoch, y = val_acc,
   ylim(0.5, 1.0)
 
 print(plot_val_acc)
-ggsave("figura_accuracy_validacion.png", plot_val_acc, 
-       width = 10, height = 6, dpi = 300)
+ggsave( filename = file.path(data_dir, "figura_accuracy_validacion.png"), plot = plot_val_acc, width = 10, height = 6, dpi = 300 )
 
 # GRÁFICA 3: Train vs Validation (para detectar overfitting)
 # Seleccionar el mejor modelo (ej: modelo 5)
@@ -560,9 +588,13 @@ plot_overfitting <- ggplot(overfitting_loss, aes(x = epoch, y = value,
   theme(legend.position = "bottom")
 
 print(plot_overfitting)
-ggsave("figura_overfitting_analysis.png", plot_overfitting, 
-       width = 10, height = 6, dpi = 300)
-
+ggsave(
+  filename = file.path(data_dir, "figura_overfitting_analysis.png"), 
+  plot = plot_val_loss, 
+  width = 10, 
+  height = 6, 
+  dpi = 300
+)
 cat("✓ Gráficas comparativas generadas\n\n")
 
 # =============================================================================
@@ -571,15 +603,17 @@ cat("✓ Gráficas comparativas generadas\n\n")
 
 cat("=== VISUALIZACIÓN DE PESOS (Filtros Conv) ===\n")
 
-# Cargar modelo CNN base (modelo 3)
-model_cnn <- load_model_hdf5("model_3_cnn_base.keras")
-
-# Extraer pesos de la primera capa convolucional
-first_conv_layer <- get_layer(model_cnn, index = 1)
-filters <- get_weights(first_conv_layer)[[1]]  # [height, width, channels, filters]
-
-cat("Dimensiones de los filtros:", dim(filters), "\n")
-cat("Número de filtros en primera capa:", dim(filters)[4], "\n\n")
+# 1. Cargar modelo CNN base (modelo 3) # 
+model_cnn <- load_model(file.path(data_dir,"model_3_cnn_base.keras"))
+# 2. Extraer la primera capa CONVOLUCIONAL (buscándola por nombre o tipo para evitar errores de índice) 
+# Si sabes que es la primera capa, usa index = 1L (con L de integer) 
+first_conv_layer <- get_layer(model_cnn, index = 1L) 
+# 3. Extraer pesos 
+weights <- get_weights(first_conv_layer)
+filters <- weights[[1]] # El primer elemento son los pesos, el segundo los bias 
+# 4. Mostrar información
+cat("Dimensiones de los filtros:", paste(dim(filters), collapse = " x "), "\n")
+cat("Número de filtros en primera capa:", dim(filters)[4], "\n")
 
 # Función para visualizar filtros
 plot_conv_filters <- function(filters, n_filters = 32, ncol = 8) {
@@ -605,7 +639,8 @@ plot_conv_filters <- function(filters, n_filters = 32, ncol = 8) {
 }
 
 # Visualizar los 32 filtros de la primera capa
-png("figura_filtros_conv1.png", width = 2400, height = 1200, res = 300)
+png(file.path(data_dir, "figura_filtros_conv1.png"), width = 2400, height = 1200, res = 300)
+
 plot_conv_filters(filters, n_filters = 32, ncol = 8)
 dev.off()
 
@@ -624,7 +659,7 @@ cat("Rango:", range(filters), "\n\n")
 cat("=== MAPAS DE CARACTERÍSTICAS ===\n")
 
 # Cargar metadata y seleccionar una imagen de test
-metadata <- readRDS("dataset_metadata.rds")
+metadata <- readRDS(file.path(data_dir,"dataset_metadata.rds"))
 test_data <- metadata$test
 
 # Seleccionar una imagen de cada clase para análisis
@@ -632,33 +667,42 @@ sample_class_a <- test_data %>% filter(label == 0) %>% slice(1)
 sample_class_b <- test_data %>% filter(label == 1) %>% slice(1)
 
 # Función para extraer mapas de características
-get_feature_maps <- function(model, img_path, layer_indices = c(1, 3, 5)) {
-  # Cargar y preprocesar imagen
-  img <- image_load(img_path, target_size = c(100, 100), color_mode = "grayscale")
+get_feature_maps <- function(model, image_path, layer_indices) {
+  # 1. Cargar y preparar la imagen
+  img <- image_load(image_path, target_size = c(100, 100), color_mode = "grayscale")
   img_array <- image_to_array(img)
   img_array <- array_reshape(img_array, c(1, 100, 100, 1))
-  img_array <- img_array / 255
+  img_array <- img_array / 255 # Normalización manual
   
-  # Crear modelo para extraer activaciones intermedias
-  layer_outputs <- lapply(layer_indices, function(idx) {
-    get_layer(model, index = idx)$output
-  })
+  # 2. Extraer las salidas de las capas deseadas
+  # Cambiamos 'model$input' por 'model$inputs' para Keras 3
+  layer_outputs <- lapply(layer_indices, function(i) model$layers[[i]]$output)
   
-  activation_model <- keras_model(inputs = model$input, outputs = layer_outputs)
+  # 3. Crear un modelo intermedio que devuelva los mapas de características
+  activation_model <- keras_model(inputs = model$inputs, outputs = layer_outputs)
   
-  # Obtener activaciones
+  # 4. Obtener las activaciones
   activations <- predict(activation_model, img_array)
   
-  return(list(
-    image = img_array[1,,,1],
-    activations = activations,
-    layer_indices = layer_indices
-  ))
+  return(activations)
 }
 
 # Extraer feature maps para una imagen de Clase A
 cat("Extrayendo feature maps para Clase A...\n")
-feature_maps_a <- get_feature_maps(model_cnn, sample_class_a$image_path, 
+# 1. Asegurar que las dimensiones son enteros (L)
+img_size_dims <- c(1L, 100L, 100L, 1L) 
+
+# 2. Forzar la construcción física del modelo
+model_cnn$build(input_shape = img_size_dims)
+
+# 3. Crear un tensor de prueba y pasarlo por el modelo 
+# Usamos predict() porque es la forma más oficial de 'llamar' al modelo
+dummy_data <- array(0, dim = img_size_dims)
+predict(model_cnn, dummy_data) 
+
+# 4. Ahora intenta de nuevo la extracción
+feature_maps_a <- get_feature_maps(model_cnn, 
+                                   sample_class_a$image_path, 
                                    layer_indices = c(1, 3, 5))
 
 # Función para visualizar feature maps de una capa
@@ -684,19 +728,21 @@ plot_feature_maps <- function(activation, layer_name, n_features = 16, ncol = 4)
 }
 
 # Visualizar mapas de la primera capa convolucional
-png("figura_feature_maps_conv1.png", width = 2000, height = 2000, res = 300)
+png(file.path(data_dir, "figura_feature_maps_conv1.png"), width = 2000, height = 2000, res = 300)
 plot_feature_maps(feature_maps_a$activations[[1]], "Conv1 (32 filtros)", 
                   n_features = 16, ncol = 4)
 dev.off()
 
 # Visualizar mapas de la segunda capa convolucional
-png("figura_feature_maps_conv2.png", width = 2000, height = 2000, res = 300)
+png(file.path(data_dir, "figura_feature_maps_conv2.png"), width = 2000, height = 2000, res = 300)
+
 plot_feature_maps(feature_maps_a$activations[[2]], "Conv2 (64 filtros)", 
                   n_features = 16, ncol = 4)
 dev.off()
 
 # Visualizar mapas de la tercera capa convolucional
-png("figura_feature_maps_conv3.png", width = 2000, height = 2000, res = 300)
+png(file.path(data_dir, "figura_feature_maps_conv3.png"), width = 2000, height = 2000, res = 300)
+
 plot_feature_maps(feature_maps_a$activations[[3]], "Conv3 (128 filtros)", 
                   n_features = 16, ncol = 4)
 dev.off()
@@ -768,8 +814,11 @@ final_results <- data.frame(
 print(final_results)
 
 # Guardar tabla en CSV para incluir en memoria
-write.csv(final_results, "tabla_resultados_finales.csv", row.names = FALSE)
-
+write.csv(
+  final_results, 
+  file = file.path(data_dir, "tabla_resultados_finales.csv"), 
+  row.names = FALSE
+)
 # Identificar mejor modelo
 best_model_idx <- which.max(final_results$Val_Acc)
 cat("\n✓ MEJOR MODELO:", model_names[best_model_idx], "\n")
