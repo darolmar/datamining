@@ -1,6 +1,6 @@
 # =============================================================================
 # PRÁCTICA 3 - DEEP LEARNING: Clasificación de Granos de Polen
-# Parte 1: Exploración y Análisis Exploratorio del Dataset
+# Parte 1: Exploración y Análisis Exploratorio del Data
 # =============================================================================
 
 # 1. Instalación de paquetes necesarios (incluyendo keras3)
@@ -413,7 +413,31 @@ save_model(model_3, file.path(data_dir, "model_3_cnn_base.keras"), overwrite = T
 history_3 <- model_3 %>% fit(train_dataset_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
 saveRDS(history_3, file.path(data_dir, "history_3.rds"))
 
+# MODELO 3b: CNN Base SIN AUGMENTATION (para comparación)
+model_3_no_aug <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3, 3), activation = "relu", 
+                input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
+  layer_max_pooling_2d() %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d() %>%
+  layer_flatten() %>%
+  layer_dense(units = 128, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
 
+model_3_no_aug %>% compile(
+  optimizer = optimizer_adam(), 
+  loss = "binary_crossentropy", 
+  metrics = "accuracy"
+)
+
+history_3_no_aug <- model_3_no_aug %>% fit(
+  train_dataset_no_aug,  # ← SIN augmentation
+  epochs = EPOCHS, 
+  validation_data = validation_dataset, 
+  verbose = 2
+)
+
+saveRDS(history_3_no_aug, file.path(data_dir, "history_3_no_aug.rds"))
 
 # =============================================================================
 # 7. MODELO 4: CNN CON BATCH NORMALIZATION
