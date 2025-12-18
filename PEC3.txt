@@ -443,27 +443,53 @@ saveRDS(history_3_no_aug, file.path(data_dir, "history_3_no_aug.rds"))
 # 7. MODELO 4: CNN CON BATCH NORMALIZATION
 # =============================================================================
 
-model_4 <- keras_model_sequential() %>%
-  layer_conv_2d(32, c(3,3), activation = "relu", input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
+model_4  <- keras_model_sequential() %>%
+  # Bloque 1
+  layer_conv_2d(32, c(3,3), activation = "relu", 
+                input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
   layer_batch_normalization() %>%
   layer_max_pooling_2d() %>%
   
+  # Bloque 2
   layer_conv_2d(64, c(3,3), activation = "relu") %>%
   layer_batch_normalization() %>%
   layer_max_pooling_2d() %>%
   
+  # Bloque 3
   layer_conv_2d(128, c(3,3), activation = "relu") %>%
   layer_batch_normalization() %>%
   layer_max_pooling_2d() %>%
   
+  # Bloque 4 (adicional vs Modelo 3)
+  layer_conv_2d(256, c(3,3), activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d() %>%
+  
+  # Capas densas
   layer_flatten() %>%
+  layer_dense(256, activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_dropout(0.5) %>%
   layer_dense(128, activation = "relu") %>%
   layer_dropout(0.5) %>%
   layer_dense(1, activation = "sigmoid")
 
-model_4 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
+model_4 %>% compile(
+  optimizer = optimizer_adam(learning_rate = 0.001), 
+  loss = "binary_crossentropy", 
+  metrics = "accuracy"
+)
 
-history_4 <- model_4 %>% fit(train_dataset_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
+summary(model_4)
+
+history_4 <- model_4 %>% fit(
+  train_dataset_aug,
+  epochs = EPOCHS,
+  validation_data = validation_dataset,
+  verbose = 2
+)
+
+save_model(model_4, file.path(data_dir, "model_4.keras"), overwrite = TRUE)
 saveRDS(history_4, file.path(data_dir, "history_4.rds"))
 
 
@@ -472,24 +498,52 @@ saveRDS(history_4, file.path(data_dir, "history_4.rds"))
 # =============================================================================
 
 model_5 <- keras_model_sequential() %>%
-  layer_conv_2d(32, c(5,5), activation = "relu", input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
+  # Bloque 1: Kernel grande (5x5)
+  layer_conv_2d(32, c(5,5), activation = "relu", 
+                input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
   layer_batch_normalization() %>%
   layer_max_pooling_2d() %>%
   
+  # Bloque 2: Kernel estándar (3x3)
   layer_conv_2d(64, c(3,3), activation = "relu") %>%
   layer_batch_normalization() %>%
   layer_max_pooling_2d() %>%
   
+  # Bloque 3: Kernel estándar (3x3)
   layer_conv_2d(128, c(3,3), activation = "relu") %>%
   layer_batch_normalization() %>%
+  layer_max_pooling_2d() %>%
   
+  # Bloque 4: Más profundo
+  layer_conv_2d(256, c(3,3), activation = "relu") %>%
+  layer_batch_normalization() %>%
+  
+  # Global Average Pooling (reemplaza Flatten)
   layer_global_average_pooling_2d() %>%
+  
+  # Capas densas finales
+  layer_dropout(0.5) %>%
+  layer_dense(128, activation = "relu") %>%
   layer_dropout(0.5) %>%
   layer_dense(1, activation = "sigmoid")
 
-model_5 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
+model_5 %>% compile(
+  optimizer = optimizer_adam(learning_rate = 0.001), 
+  loss = "binary_crossentropy", 
+  metrics = "accuracy"
+)
 
-history_5 <- model_5 %>% fit(train_dataset_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
+summary(model_5)
+
+history_5 <- model_5 %>% fit(
+  train_dataset_aug,
+  epochs = EPOCHS,
+  validation_data = validation_dataset,
+  verbose = 2
+)
+
+save_model(model_5, file.path(data_dir, "model_5.keras"), overwrite = TRUE)
+
 saveRDS(history_5, file.path(data_dir, "history_5.rds"))
 
 
