@@ -423,7 +423,18 @@ model_4 <- keras_model_sequential() %>%
   layer_conv_2d(32, c(3,3), activation = "relu", input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
   layer_batch_normalization() %>%
   layer_max_pooling_2d() %>%
+  
+  layer_conv_2d(64, c(3,3), activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d() %>%
+  
+  layer_conv_2d(128, c(3,3), activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d() %>%
+  
   layer_flatten() %>%
+  layer_dense(128, activation = "relu") %>%
+  layer_dropout(0.5) %>%
   layer_dense(1, activation = "sigmoid")
 
 model_4 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
@@ -437,8 +448,19 @@ saveRDS(history_4, file.path(data_dir, "history_4.rds"))
 # =============================================================================
 
 model_5 <- keras_model_sequential() %>%
-  layer_conv_2d(32, c(3,3), activation = "relu", input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
+  layer_conv_2d(32, c(5,5), activation = "relu", input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d() %>%
+  
+  layer_conv_2d(64, c(3,3), activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d() %>%
+  
+  layer_conv_2d(128, c(3,3), activation = "relu") %>%
+  layer_batch_normalization() %>%
+  
   layer_global_average_pooling_2d() %>%
+  layer_dropout(0.5) %>%
   layer_dense(1, activation = "sigmoid")
 
 model_5 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
