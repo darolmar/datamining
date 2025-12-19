@@ -444,43 +444,29 @@ saveRDS(history_3_no_aug, file.path(data_dir, "history_3_no_aug.rds"))
 # =============================================================================
 
 model_4  <- keras_model_sequential() %>%
-  # Bloque 1
   layer_conv_2d(32, c(3,3), activation = "relu", 
                 input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
   layer_batch_normalization() %>%
   layer_max_pooling_2d() %>%
   
-  # Bloque 2
   layer_conv_2d(64, c(3,3), activation = "relu") %>%
   layer_batch_normalization() %>%
   layer_max_pooling_2d() %>%
   
-  # Bloque 3
   layer_conv_2d(128, c(3,3), activation = "relu") %>%
   layer_batch_normalization() %>%
   layer_max_pooling_2d() %>%
   
-  # Bloque 4 (adicional vs Modelo 3)
-  layer_conv_2d(256, c(3,3), activation = "relu") %>%
-  layer_batch_normalization() %>%
-  layer_max_pooling_2d() %>%
-  
-  # Capas densas
   layer_flatten() %>%
-  layer_dense(256, activation = "relu") %>%
-  layer_batch_normalization() %>%
-  layer_dropout(0.5) %>%
   layer_dense(128, activation = "relu") %>%
   layer_dropout(0.5) %>%
   layer_dense(1, activation = "sigmoid")
 
 model_4 %>% compile(
-  optimizer = optimizer_adam(learning_rate = 0.001), 
+  optimizer = optimizer_adam(learning_rate = 0.0001),  # LR 10x menor
   loss = "binary_crossentropy", 
   metrics = "accuracy"
 )
-
-summary(model_4)
 
 history_4 <- model_4 %>% fit(
   train_dataset_aug,
@@ -488,7 +474,6 @@ history_4 <- model_4 %>% fit(
   validation_data = validation_dataset,
   verbose = 2
 )
-
 save_model(model_4, file.path(data_dir, "model_4.keras"), overwrite = TRUE)
 saveRDS(history_4, file.path(data_dir, "history_4.rds"))
 
@@ -498,42 +483,31 @@ saveRDS(history_4, file.path(data_dir, "history_4.rds"))
 # =============================================================================
 
 model_5 <- keras_model_sequential() %>%
-  # Bloque 1: Kernel grande (5x5)
-  layer_conv_2d(32, c(5,5), activation = "relu", 
+  layer_conv_2d(32, c(5,5), activation = "relu",  # Kernel 5x5
                 input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
-  layer_batch_normalization() %>%
   layer_max_pooling_2d() %>%
+  layer_dropout(0.25) %>%
   
-  # Bloque 2: Kernel estándar (3x3)
   layer_conv_2d(64, c(3,3), activation = "relu") %>%
-  layer_batch_normalization() %>%
   layer_max_pooling_2d() %>%
+  layer_dropout(0.25) %>%
   
-  # Bloque 3: Kernel estándar (3x3)
   layer_conv_2d(128, c(3,3), activation = "relu") %>%
-  layer_batch_normalization() %>%
   layer_max_pooling_2d() %>%
+  layer_dropout(0.25) %>%
   
-  # Bloque 4: Más profundo
-  layer_conv_2d(256, c(3,3), activation = "relu") %>%
-  layer_batch_normalization() %>%
-  
-  # Global Average Pooling (reemplaza Flatten)
-  layer_global_average_pooling_2d() %>%
-  
-  # Capas densas finales
+  layer_flatten() %>%
+  layer_dense(256, activation = "relu") %>%
   layer_dropout(0.5) %>%
   layer_dense(128, activation = "relu") %>%
   layer_dropout(0.5) %>%
   layer_dense(1, activation = "sigmoid")
 
 model_5 %>% compile(
-  optimizer = optimizer_adam(learning_rate = 0.001), 
+  optimizer = optimizer_adam(learning_rate = 0.0001),
   loss = "binary_crossentropy", 
   metrics = "accuracy"
 )
-
-summary(model_5)
 
 history_5 <- model_5 %>% fit(
   train_dataset_aug,
@@ -541,9 +515,7 @@ history_5 <- model_5 %>% fit(
   validation_data = validation_dataset,
   verbose = 2
 )
-
 save_model(model_5, file.path(data_dir, "model_5.keras"), overwrite = TRUE)
-
 saveRDS(history_5, file.path(data_dir, "history_5.rds"))
 
 
@@ -955,3 +927,433 @@ cat("  - figura_feature_maps_conv2.png\n")
 cat("  - figura_feature_maps_conv3.png\n")
 cat("  - figura_comparacion_clases.png\n")
 cat("  - tabla_resultados_finales.csv\n")
+
+# =============================================================================
+# GRÁFICA COMPARATIVA: MODELOS 1, 2 Y 3
+# Análisis de progresión arquitectónica (NET-1 → MLP → CNN)
+# =============================================================================
+
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(gridExtra)
+
+# Configurar directorio
+data_dir <- "/Users/darolmar/Desktop/anuka1200"
+
+# =============================================================================
+# 1. CARGAR HISTORIALES DE ENTRENAMIENTO
+# =============================================================================
+
+cat("Cargando historiales de entrenamiento...\n")
+
+history_1 <- readRDS(file.path(data_dir, "history_1.rds"))
+history_2 <- readRDS(file.path(data_dir, "history_2.rds"))
+history_3_no_aug <- readRDS(file.path(data_dir, "history_3_no_aug.rds"))
+history_3_aug <- readRDS(file.path(data_dir, "history_3.rds"))
+
+# Función para extraer métricas en formato tidy
+extract_metrics <- function(history, model_name) {
+  epochs <- seq_along(history$metrics$loss)
+  
+  data.frame(
+    epoch = epochs,
+    model = model_name,
+    train_loss = history$metrics$loss,
+    val_loss = history$metrics$val_loss,
+    train_acc = history$metrics$accuracy,
+    val_acc = history$metrics$val_accuracy
+  )
+}
+
+# Consolidar modelos 1, 2, 3 (sin augmentation) y 3 (con augmentation)
+all_metrics <- rbind(
+  extract_metrics(history_1, "Modelo 1: NET-1"),
+  extract_metrics(history_2, "Modelo 2: MLP"),
+  extract_metrics(history_3_no_aug, "Modelo 3: CNN (sin aug)"),
+  extract_metrics(history_3_aug, "Modelo 3: CNN (con aug)")
+)
+
+cat("✓ Historiales cargados\n\n")
+
+# =============================================================================
+# 2. GRÁFICA PRINCIPAL: ACCURACY DE VALIDACIÓN (Progresión arquitectónica)
+# =============================================================================
+
+cat("Generando gráfica de accuracy en validación...\n")
+
+# Paleta de colores académica
+colores <- c(
+  "Modelo 1: NET-1" = "#E41A1C",           # Rojo
+  "Modelo 2: MLP" = "#377EB8",             # Azul
+  "Modelo 3: CNN (sin aug)" = "#4DAF4A",   # Verde oscuro
+  "Modelo 3: CNN (con aug)" = "#984EA3"    # Púrpura
+)
+
+plot_accuracy_progresion <- ggplot(all_metrics, 
+                                   aes(x = epoch, y = val_acc, 
+                                       color = model, linetype = model)) +
+  geom_line(size = 1.2) +
+  
+  # Línea horizontal en el mejor resultado (para referencia)
+  geom_hline(yintercept = 0.9271, linetype = "dashed", 
+             color = "gray30", alpha = 0.5) +
+  annotate("text", x = 45, y = 0.935, 
+           label = "Mejor resultado: 92.71%", 
+           size = 3.5, color = "gray30") +
+  
+  # Estilo y etiquetas
+  labs(
+    title = "Progresión Arquitectónica: NET-1 → MLP → CNN",
+    subtitle = "Evolución del accuracy de validación durante entrenamiento",
+    x = "Época",
+    y = "Validation Accuracy",
+    color = "Arquitectura",
+    linetype = "Arquitectura"
+  ) +
+  
+  # Tema académico
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "gray40"),
+    legend.position = "bottom",
+    legend.direction = "vertical",
+    legend.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "gray90"),
+    axis.title = element_text(face = "bold")
+  ) +
+  
+  # Colores personalizados
+  scale_color_manual(values = colores) +
+  scale_linetype_manual(values = c(
+    "Modelo 1: NET-1" = "solid",
+    "Modelo 2: MLP" = "solid",
+    "Modelo 3: CNN (sin aug)" = "solid",
+    "Modelo 3: CNN (con aug)" = "dashed"
+  )) +
+  
+  # Escala del eje Y
+  scale_y_continuous(
+    limits = c(0.5, 1.0),
+    breaks = seq(0.5, 1.0, 0.1),
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  
+  # Escala del eje X
+  scale_x_continuous(breaks = seq(0, 50, 10))
+
+print(plot_accuracy_progresion)
+
+# Guardar en alta resolución
+ggsave(
+  filename = file.path(data_dir, "figura_comparativa_modelos_123.png"),
+  plot = plot_accuracy_progresion,
+  width = 12,
+  height = 7,
+  dpi = 300
+)
+
+cat("✓ Gráfica principal guardada\n\n")
+
+# =============================================================================
+# 3. GRÁFICA SECUNDARIA: LOSS DE VALIDACIÓN
+# =============================================================================
+
+cat("Generando gráfica de loss en validación...\n")
+
+plot_loss_progresion <- ggplot(all_metrics, 
+                               aes(x = epoch, y = val_loss, 
+                                   color = model, linetype = model)) +
+  geom_line(size = 1.2) +
+  
+  labs(
+    title = "Progresión del Loss en Validación",
+    subtitle = "Binary Crossentropy Loss (menor es mejor)",
+    x = "Época",
+    y = "Validation Loss",
+    color = "Arquitectura",
+    linetype = "Arquitectura"
+  ) +
+  
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "gray40"),
+    legend.position = "bottom",
+    legend.direction = "vertical",
+    legend.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "gray90"),
+    axis.title = element_text(face = "bold")
+  ) +
+  
+  scale_color_manual(values = colores) +
+  scale_linetype_manual(values = c(
+    "Modelo 1: NET-1" = "solid",
+    "Modelo 2: MLP" = "solid",
+    "Modelo 3: CNN (sin aug)" = "solid",
+    "Modelo 3: CNN (con aug)" = "dashed"
+  )) +
+  
+  scale_x_continuous(breaks = seq(0, 50, 10))
+
+print(plot_loss_progresion)
+
+ggsave(
+  filename = file.path(data_dir, "figura_comparativa_loss_123.png"),
+  plot = plot_loss_progresion,
+  width = 12,
+  height = 7,
+  dpi = 300
+)
+
+cat("✓ Gráfica de loss guardada\n\n")
+
+# =============================================================================
+# 4. GRÁFICA COMPARATIVA: TRAIN VS VALIDATION (Panel múltiple)
+# =============================================================================
+
+cat("Generando panel comparativo train vs validation...\n")
+
+# Preparar datos para facet (solo modelos principales)
+modelos_principales <- all_metrics %>%
+  filter(model %in% c("Modelo 1: NET-1", 
+                      "Modelo 2: MLP", 
+                      "Modelo 3: CNN (sin aug)"))
+
+# Convertir a formato largo para train y val
+datos_largo <- modelos_principales %>%
+  select(epoch, model, train_acc, val_acc) %>%
+  melt(id.vars = c("epoch", "model"),
+       variable.name = "conjunto",
+       value.name = "accuracy")
+
+# Renombrar para claridad
+datos_largo$conjunto <- factor(
+  datos_largo$conjunto,
+  levels = c("train_acc", "val_acc"),
+  labels = c("Entrenamiento", "Validación")
+)
+
+plot_train_val_panel <- ggplot(datos_largo, 
+                               aes(x = epoch, y = accuracy, 
+                                   color = conjunto, linetype = conjunto)) +
+  geom_line(size = 1) +
+  facet_wrap(~ model, ncol = 1) +
+  
+  labs(
+    title = "Análisis de Overfitting: Train vs Validation",
+    subtitle = "Comparación por modelo",
+    x = "Época",
+    y = "Accuracy",
+    color = "Conjunto",
+    linetype = "Conjunto"
+  ) +
+  
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray40"),
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 11),
+    strip.background = element_rect(fill = "gray95", color = NA),
+    panel.grid.minor = element_blank(),
+    axis.title = element_text(face = "bold")
+  ) +
+  
+  scale_color_manual(values = c("Entrenamiento" = "#377EB8", 
+                                 "Validación" = "#E41A1C")) +
+  scale_linetype_manual(values = c("Entrenamiento" = "solid", 
+                                   "Validación" = "dashed")) +
+  
+  scale_y_continuous(
+    limits = c(0.5, 1.0),
+    breaks = seq(0.5, 1.0, 0.1),
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  
+  scale_x_continuous(breaks = seq(0, 50, 10))
+
+print(plot_train_val_panel)
+
+ggsave(
+  filename = file.path(data_dir, "figura_train_val_panel_123.png"),
+  plot = plot_train_val_panel,
+  width = 10,
+  height = 10,
+  dpi = 300
+)
+
+cat("✓ Panel train vs validation guardado\n\n")
+
+# =============================================================================
+# 5. TABLA COMPARATIVA DE RESULTADOS FINALES
+# =============================================================================
+
+cat("Generando tabla comparativa de resultados finales...\n")
+
+# Extraer métricas finales (última época)
+resultados_finales <- data.frame(
+  Modelo = c("NET-1", "MLP", "CNN (sin aug)", "CNN (con aug)"),
+  
+  Train_Acc = c(
+    round(tail(history_1$metrics$accuracy, 1), 4),
+    round(tail(history_2$metrics$accuracy, 1), 4),
+    round(tail(history_3_no_aug$metrics$accuracy, 1), 4),
+    round(tail(history_3_aug$metrics$accuracy, 1), 4)
+  ),
+  
+  Val_Acc = c(
+    round(tail(history_1$metrics$val_accuracy, 1), 4),
+    round(tail(history_2$metrics$val_accuracy, 1), 4),
+    round(tail(history_3_no_aug$metrics$val_accuracy, 1), 4),
+    round(tail(history_3_aug$metrics$val_accuracy, 1), 4)
+  ),
+  
+  Val_Loss = c(
+    round(tail(history_1$metrics$val_loss, 1), 4),
+    round(tail(history_2$metrics$val_loss, 1), 4),
+    round(tail(history_3_no_aug$metrics$val_loss, 1), 4),
+    round(tail(history_3_aug$metrics$val_loss, 1), 4)
+  ),
+  
+  Parametros = c(
+    "10,001",
+    "3,383,873",
+    "2,473,729",
+    "2,473,729"
+  )
+)
+
+# Calcular gap
+resultados_finales$Gap <- resultados_finales$Train_Acc - resultados_finales$Val_Acc
+
+# Calcular mejora sobre NET-1
+resultados_finales$Mejora_vs_NET1 <- 
+  (resultados_finales$Val_Acc - resultados_finales$Val_Acc[1]) * 100
+
+# Imprimir tabla
+cat("\n=== TABLA COMPARATIVA DE RESULTADOS ===\n\n")
+print(resultados_finales)
+
+# Guardar tabla
+write.csv(
+  resultados_finales,
+  file.path(data_dir, "tabla_comparativa_modelos_123.csv"),
+  row.names = FALSE
+)
+
+cat("\n✓ Tabla guardada en CSV\n\n")
+
+# =============================================================================
+# 6. GRÁFICA DE BARRAS: COMPARACIÓN FINAL DE ACCURACY
+# =============================================================================
+
+cat("Generando gráfica de barras comparativa...\n")
+
+# Preparar datos para barras
+datos_barras <- resultados_finales %>%
+  select(Modelo, Train_Acc, Val_Acc) %>%
+  melt(id.vars = "Modelo",
+       variable.name = "Conjunto",
+       value.name = "Accuracy")
+
+# Renombrar
+datos_barras$Conjunto <- factor(
+  datos_barras$Conjunto,
+  levels = c("Train_Acc", "Val_Acc"),
+  labels = c("Entrenamiento", "Validación")
+)
+
+plot_barras_comparativo <- ggplot(datos_barras, 
+                                  aes(x = Modelo, y = Accuracy, 
+                                      fill = Conjunto)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  
+  # Añadir valores sobre las barras
+  geom_text(aes(label = sprintf("%.2f%%", Accuracy * 100)),
+            position = position_dodge(width = 0.7),
+            vjust = -0.5,
+            size = 3.5) +
+  
+  # Línea horizontal en 92.71% (mejor resultado)
+  geom_hline(yintercept = 0.9271, linetype = "dashed", 
+             color = "gray30", alpha = 0.5) +
+  
+  labs(
+    title = "Comparación de Accuracy: Modelos 1, 2 y 3",
+    subtitle = "Resultados finales en entrenamiento y validación",
+    x = "Modelo",
+    y = "Accuracy",
+    fill = "Conjunto"
+  ) +
+  
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "gray40"),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold"),
+    axis.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 0, hjust = 0.5)
+  ) +
+  
+  scale_fill_manual(values = c("Entrenamiento" = "#377EB8", 
+                                "Validación" = "#E41A1C")) +
+  
+  scale_y_continuous(
+    limits = c(0, 1.05),
+    breaks = seq(0, 1.0, 0.2),
+    labels = scales::percent_format(accuracy = 1)
+  )
+
+print(plot_barras_comparativo)
+
+ggsave(
+  filename = file.path(data_dir, "figura_barras_comparativa_123.png"),
+  plot = plot_barras_comparativo,
+  width = 10,
+  height = 7,
+  dpi = 300
+)
+
+cat("✓ Gráfica de barras guardada\n\n")
+
+# =============================================================================
+# 7. RESUMEN Y CONCLUSIONES
+# =============================================================================
+
+cat("=======================================================\n")
+cat("✓ ANÁLISIS COMPARATIVO COMPLETADO\n")
+cat("=======================================================\n\n")
+
+cat("ARCHIVOS GENERADOS:\n")
+cat("1. figura_comparativa_modelos_123.png - Accuracy en validación\n")
+cat("2. figura_comparativa_loss_123.png - Loss en validación\n")
+cat("3. figura_train_val_panel_123.png - Panel train vs val\n")
+cat("4. figura_barras_comparativa_123.png - Comparación final\n")
+cat("5. tabla_comparativa_modelos_123.csv - Métricas tabuladas\n\n")
+
+cat("HALLAZGOS CLAVE:\n")
+cat("1. Mejor modelo: CNN sin augmentation (92.71% val accuracy)\n")
+cat("2. Mejora NET-1 → MLP:", 
+    sprintf("%.2f%%", resultados_finales$Mejora_vs_NET1[2]), "\n")
+cat("3. Mejora NET-1 → CNN sin aug:", 
+    sprintf("%.2f%%", resultados_finales$Mejora_vs_NET1[3]), "\n")
+cat("4. Impacto augmentation en CNN:", 
+    sprintf("%.2f%%", 
+            (resultados_finales$Val_Acc[3] - resultados_finales$Val_Acc[4]) * 100),
+    "(degradación)\n\n")
+
+cat("Gap de overfitting:\n")
+for(i in 1:nrow(resultados_finales)) {
+  cat(sprintf("  %s: %.2f%%\n", 
+              resultados_finales$Modelo[i], 
+              resultados_finales$Gap[i] * 100))
+}
+
+cat("\n=======================================================\n")
+cat("Ubicación:", data_dir, "\n")
+cat("=======================================================\n")
