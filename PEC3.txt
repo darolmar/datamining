@@ -417,6 +417,7 @@ model_2 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", 
 
 history_2 <- model_2 %>% fit(train_dataset_no_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
 
+save_model(model_2, file.path(data_dir, "model_2_mlp.keras"), overwrite = TRUE)
 saveRDS(history_2, file.path(data_dir, "history_2.rds"))
 
 
