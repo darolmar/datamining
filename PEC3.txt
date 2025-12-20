@@ -367,8 +367,35 @@ model_1 <- keras_model_sequential() %>%
   layer_flatten(input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
   layer_dense(units = 1, activation = "sigmoid")
 
-model_1 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
+# 1. Extraer pesos (En R, get_weights devuelve una lista)
+# Los pesos están en la capa 1 (el layer_dense)
+pesos_lista <- get_weights(model_1)
+weights <- pesos_lista[[1]] # Matriz de pesos
+bias <- pesos_lista[[2]]    # Vector de bias
 
+# 2. Reshape a imagen 100x100
+# En R, usamos la función array o simplemente cambiamos la dimensión
+weight_image <- array(weights, dim = c(100, 100))
+
+# 3. Visualizar mapa de calor
+# En lugar de matplotlib, lo más sencillo en R es usar image() o lattice
+image(weight_image, col = terrain.colors(100), main = "Mapa de pesos NET-1")
+
+# O una opción más profesional con ggplot2:
+library(ggplot2)
+library(reshape2)
+
+df_weights <- melt(weight_image)
+ggplot(df_weights, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red") +
+  labs(title = "Mapa de pesos aprendidos por NET-1", fill = "Peso") +
+  theme_minimal()
+
+# 4. Guardar la imagen
+ggsave(file.path(data_dir, "net1_weights_heatmap.png"), dpi = 300)
+
+model_1 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
 history_1 <- model_1 %>% fit(train_dataset_no_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
 
 save_model(model_1, file.path(data_dir, "model_1_net1.keras"), overwrite = TRUE)
