@@ -250,26 +250,46 @@ cat("4. Preparado para iniciar modelado\n")
 # =============================================================================
 
 metadata <- readRDS(file.path(data_dir,"dataset_metadata.rds"))
-train_data <- metadata$train
-val_data <- metadata$val
-test_data <- metadata$test
 
 IMG_HEIGHT <- if(!is.null(metadata$img_dims[1])) as.integer(metadata$img_dims[1]) else 100L
 IMG_WIDTH  <- if(!is.null(metadata$img_dims[2])) as.integer(metadata$img_dims[2]) else 100L
 BATCH_SIZE <- 32L
 EPOCHS <- 50L
 
+train_data <- metadata$train
+val_data <- metadata$val
+test_data <- metadata$test
+
+
 # =============================================================================
-# 2. GENERADORES DE DATOS (VERSION KERAS 3)
+# 2. GENERADORES DE DATOS
 # =============================================================================
 
-# En Keras 3, la normalización y el aumento se definen como capas o funciones del dataset
+# Normalización de los datos
 normalization_layer <- layer_rescaling(scale = 1/255)
+
+# Data Augmentation como una secuencia de capas
+data_augmentation <- keras_model_sequential(layers = list(
+  # 1. Rotación aleatoria: ±40° (40/360 = 0.111)
+  # El factor en Keras 3 representa una fracción de 2pi
+  layer_random_rotation(factor = 0.11, 
+                        fill_mode = "nearest"),
+  # 2. Desplazamiento horizontal y vertical: ±15%
+  layer_random_translation(height_factor = 0.15, 
+                           width_factor = 0.15, 
+                           fill_mode = "nearest"),
+  # 3. Zoom aleatorio: ±10%
+  layer_random_zoom(height_factor = 0.10, 
+                    width_factor = 0.10, 
+                    fill_mode = "nearest"),
+  # 4. Flip horizontal: Probabilidad 0.5
+  layer_random_flip(mode = "horizontal")
+))
 
 # Definición del modelo usando una lista de capas
 model <- keras_model_sequential(layers = list(
   # 1. Capa de entrada y normalización integrada
-  layer_rescaling(scale = 1/255, input_shape = c(100L, 100L, 1L)),
+  layer_rescaling(scale = 1/255, input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1L)),
   
   # 2. Primera capa convolucional
   layer_conv_2d(filters = 32L, kernel_size = c(3L, 3L), activation = "relu"),
@@ -285,59 +305,101 @@ model <- keras_model_sequential(layers = list(
   layer_dense(units = 1L, activation = "sigmoid") # Sigmoid para clasificación binaria
 ))
 
-# Ver el resumen del modelo para confirmar que todo está bien
-summary(model)
 
-data_augmentation <- keras_model_sequential(layers = list(
-  layer_random_flip(mode = "horizontal_and_vertical"),
-  layer_random_rotation(factor = 0.11),
-  layer_random_translation(height_factor = 0.2, width_factor = 0.2),
-  layer_random_zoom(height_factor = 0.2, width_factor = 0.2)
+# Aplicar transformaciones
+# Dataset SIN aumentación
+train_dataset_no_aug <- tensor_slices_dataset(list(
+  train_data$image_path, 
+  train_data$label
 ))
+ds_train_no_aug <- dataset_map(train_dataset_no_aug, load_and_preprocess)
+ds_train_no_aug <- dataset_map(ds_train_no_aug, function(img, label) {
+  list(normalization_layer(img), label)
+})
+ds_train_no_aug <- dataset_batch(ds_train_no_aug, BATCH_SIZE)
+train_dataset_no_aug <- dataset_prefetch(ds_train_no_aug, tensorflow::tf$data$AUTOTUNE)
 
-# Crear Datasets
-# Nota: Keras 3 usa el directorio raíz y detecta subcarpetas como clases automáticamente
-full_train_ds <- image_dataset_from_directory(
-  data_dir,
-  label_mode = "binary",
-  color_mode = "grayscale",
-  image_size = c(IMG_HEIGHT, IMG_WIDTH),
-  batch_size = BATCH_SIZE,
-  seed = 123L,
-  validation_split = 0.2, # Usamos el split nativo para asegurar compatibilidad
-  subset = "training"
-)
 
-full_val_ds <- image_dataset_from_directory(
-  data_dir,
-  label_mode = "binary",
-  color_mode = "grayscale",
-  image_size = c(IMG_HEIGHT, IMG_WIDTH),
-  batch_size = BATCH_SIZE,
-  seed = 123L,
-  validation_split = 0.2,
-  subset = "validation"
-)
 
-# Aplicar transformaciones (Pipeline optimizado)
-train_dataset_no_aug <- full_train_ds %>% 
-  tfdatasets::dataset_map(function(x, y) list(normalization_layer(x), y)) %>% 
-  tfdatasets::dataset_prefetch(buffer_size = tensorflow::tf$data$AUTOTUNE)
+#Dataset con aumentación
+train_dataset_aug_base <- tensor_slices_dataset(list(
+  train_data$image_path, 
+  train_data$label
+))
+# 1. Función de carga: Convierte la ruta de archivo en un tensor de imagen
+load_and_preprocess <- function(path, label) {
+  img <- tensorflow::tf$io$read_file(path)
+  img <- tensorflow::tf$image$decode_image(img, channels = 1L, expand_animations = FALSE)
+  img <- tensorflow::tf$image$resize(img, size = c(IMG_HEIGHT, IMG_WIDTH))
+  list(img, label)
+}
 
-# Dataset SIN Augmentation
-train_dataset_no_aug <- full_train_ds %>% 
-  tfdatasets::dataset_map(function(x, y) list(normalization_layer(x), y)) %>%
-  tfdatasets::dataset_prefetch(buffer_size = tensorflow::tf$data$AUTOTUNE)
+# 2. Construcción del Dataset
+# Paso A: Transformar rutas en imágenes (3D)
+ds <- dataset_map(train_dataset_aug_base, load_and_preprocess)
 
-# Dataset CON Augmentation
-train_dataset_aug <- full_train_ds %>% 
-  tfdatasets::dataset_map(function(x, y) list(data_augmentation(normalization_layer(x), training = TRUE), y)) %>%
-  tfdatasets::dataset_prefetch(buffer_size = tensorflow::tf$data$AUTOTUNE)
+# Paso B: Normalización simple (antes del batch)
+ds <- dataset_map(ds, function(img, label) {
+  list(normalization_layer(img), label)
+})
 
-# Dataset de Validación 
-validation_dataset <- full_val_ds %>%
-  tfdatasets::dataset_map(function(x, y) list(normalization_layer(x), y)) %>%
-  tfdatasets::dataset_prefetch(buffer_size = tensorflow::tf$data$AUTOTUNE)
+# Paso C: Shuffle y BATCHING (Aquí los datos pasan a ser 4D automáticamente)
+ds <- dataset_shuffle(ds, buffer_size = 1000L)
+ds <- dataset_batch(ds, BATCH_SIZE)
+
+# Paso D: APLICAR AUMENTACIÓN USANDO LAS CAPAS DIRECTAMENTE
+# Extraemos las capas del modelo para usarlas de forma independiente
+layers <- data_augmentation$layers
+
+train_dataset_aug <- dataset_map(ds, function(img, label) {
+  # Pasamos el lote de imágenes por cada transformación
+  img_aug <- img
+  for (layer in layers) {
+    img_aug <- layer(img_aug, training = TRUE)
+  }
+  list(img_aug, label)
+})
+
+# Paso E: Prefetch
+train_dataset_aug <- dataset_prefetch(train_dataset_aug, buffer_size = tensorflow::tf$data$AUTOTUNE)
+
+
+#Dataset de validación
+validation_dataset <- tensor_slices_dataset(list(
+  val_data$image_path, 
+  val_data$label
+))
+ds_val <- dataset_map(validation_dataset, load_and_preprocess)
+ds_val <- dataset_map(ds_val, function(img, label) {
+  list(normalization_layer(img), label)
+})
+ds_val <- dataset_batch(ds_val, BATCH_SIZE)
+validation_dataset <- dataset_prefetch(ds_val, tensorflow::tf$data$AUTOTUNE)
+
+#Dataset de test
+test_dataset <- tensor_slices_dataset(list(
+  test_data$image_path, 
+  test_data$label
+))
+ds_test <- dataset_map(test_dataset, load_and_preprocess)
+ds_test <- dataset_map(ds_test, function(img, label) {
+  list(normalization_layer(img), label)
+})
+ds_test <- dataset_batch(ds_test, BATCH_SIZE)
+test_dataset <- dataset_prefetch(ds_test, tensorflow::tf$data$AUTOTUNE)
+
+
+
+
+cat("\n✓ Preparación de datasets completada\n")
+n_train_no_aug <- as.numeric(tensorflow::tf$data$experimental$cardinality(train_dataset_no_aug))
+n_train_aug <- as.numeric(tensorflow::tf$data$experimental$cardinality(train_dataset_aug))
+n_val <- as.numeric(tensorflow::tf$data$experimental$cardinality(validation_dataset))
+cat("\n=== CONCLUSIONES DE LA EXPLORACIÓN ===\n")
+cat("Número de elementos:\n")
+cat("- Entrenamiento (sin aug):", n_train_no_aug, "\n")
+cat("- Entrenamiento (con aug):", n_train_aug, "\n")
+cat("- Validación:            ", n_val, "\n")
 
 # =============================================================================
 # 3. VISUALIZAR AUGMENTATION (ACTUALIZADO)
@@ -363,39 +425,17 @@ visualize_augmentation(train_dataset_aug)
 # 4. MODELO 1: NET-1 (REGRESIÓN LOGÍSTICA)
 # =============================================================================
 
-model_1 <- keras_model_sequential() %>%
-  layer_flatten(input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1)) %>%
-  layer_dense(units = 1, activation = "sigmoid")
-
-# 1. Extraer pesos (En R, get_weights devuelve una lista)
-# Los pesos están en la capa 1 (el layer_dense)
-pesos_lista <- get_weights(model_1)
-weights <- pesos_lista[[1]] # Matriz de pesos
-bias <- pesos_lista[[2]]    # Vector de bias
-
-# 2. Reshape a imagen 100x100
-# En R, usamos la función array o simplemente cambiamos la dimensión
-weight_image <- array(weights, dim = c(100, 100))
-
-# 3. Visualizar mapa de calor
-# En lugar de matplotlib, lo más sencillo en R es usar image() o lattice
-image(weight_image, col = terrain.colors(100), main = "Mapa de pesos NET-1")
-
-# O una opción más profesional con ggplot2:
-library(ggplot2)
-library(reshape2)
-
-df_weights <- melt(weight_image)
-ggplot(df_weights, aes(Var1, Var2, fill = value)) +
-  geom_tile() +
-  scale_fill_gradient2(low = "blue", mid = "white", high = "red") +
-  labs(title = "Mapa de pesos aprendidos por NET-1", fill = "Peso") +
-  theme_minimal()
-
-# 4. Guardar la imagen
-ggsave(file.path(data_dir, "net1_weights_heatmap.png"), dpi = 300)
-
-model_1 %>% compile(optimizer = optimizer_adam(), loss = "binary_crossentropy", metrics = "accuracy")
+model_1 <- keras_model_sequential(input_shape = c(IMG_HEIGHT, IMG_WIDTH, 1))
+model_1 <- layer_flatten(model_1)
+model_1 <- layer_dense(model_1, units = 64, activation = "relu")
+model_1 <- layer_dense(model_1, units = 32, activation = "relu")
+model_1 <- layer_dense(model_1, units = 1, activation = "sigmoid")
+compile(
+  model_1,
+  optimizer = "adam",
+  loss = "binary_crossentropy",
+  metrics = list("accuracy")
+)
 history_1 <- model_1 %>% fit(train_dataset_no_aug, epochs = EPOCHS, validation_data = validation_dataset, verbose = 2)
 
 save_model(model_1, file.path(data_dir, "model_1_net1.keras"), overwrite = TRUE)
@@ -547,26 +587,226 @@ save_model(model_5, file.path(data_dir, "model_5.keras"), overwrite = TRUE)
 saveRDS(history_5, file.path(data_dir, "history_5.rds"))
 
 
-
 # =============================================================================
 # 9. COMPARACIÓN FINAL
 # =============================================================================
 
-results <- data.frame(
+# Evaluación del modelo 1 en el dataset de validación y de test
+eval_1_val <- evaluate(
+  object = model_1,
+  x = validation_dataset
+)
+eval_1_test <- evaluate(
+  object = model_1,
+  x = test_dataset
+)
+
+# Evaluación del modelo 2 en el dataset de validación y de test
+eval_2_val <- evaluate(
+  object = model_2,
+  x = validation_dataset
+)
+eval_2_test <- evaluate(
+  object = model_2,
+  x = test_dataset
+)
+
+# Evaluación del modelo 3 en el dataset de validación y de test
+eval_3_val <- evaluate(
+  object = model_3,
+  x = validation_dataset
+)
+eval_3_test <- evaluate(
+  object = model_3,
+  x = test_dataset
+)
+
+# Evaluación del modelo 1 en el dataset de validación y de test
+eval_4_val <- evaluate(
+  object = model_4,
+  x = validation_dataset
+)
+eval_4_test <- evaluate(
+  object = model_4,
+  x = test_dataset
+)
+
+# Evaluación del modelo 5 en el dataset de validación y de test
+eval_5_val <- evaluate(
+  object = model_5,
+  x = validation_dataset
+)
+eval_5_test <- evaluate(
+  object = model_5,
+  x = test_dataset
+)
+
+results_val <- data.frame(
   Modelo = c("NET-1", "MLP", "CNN Base", "CNN + BN", "CNN + GAP"),
   Val_Accuracy = c(
-    tail(history_1$metrics$val_accuracy, 1),
-    tail(history_2$metrics$val_accuracy, 1),
-    tail(history_3$metrics$val_accuracy, 1),
-    tail(history_4$metrics$val_accuracy, 1),
-    tail(history_5$metrics$val_accuracy, 1)
+    eval_1_val[["accuracy"]],
+    eval_2_val[["accuracy"]],
+    eval_3_val[["accuracy"]],
+    eval_4_val[["accuracy"]],
+    eval_5_val[["accuracy"]]
+  ),
+  Val_Loss = c(
+    eval_1_val[["loss"]],
+    eval_2_val[["loss"]],
+    eval_3_val[["loss"]],
+    eval_4_val[["loss"]],
+    eval_5_val[["loss"]]
   )
 )
-print(results)
+
+cat("\n--- RESULTADOS SOBRE VALIDACIÓN ---\n")
+print(results_val)
+
+
+# Función para extraer datos de historia
+extract_history_data <- function(history, model_name) {
+  epochs <- seq_along(history$metrics$loss)
+  
+  df <- data.frame(
+    epoch = rep(epochs, 4),
+    value = c(
+      history$metrics$accuracy,
+      history$metrics$val_accuracy,
+      history$metrics$loss,
+      history$metrics$val_loss
+    ),
+    metric = rep(c("Train Accuracy", "Val Accuracy", "Train Loss", "Val Loss"), 
+                 each = length(epochs)),
+    model = model_name
+  )
+  
+  return(df)
+}
+
+# Extraer datos de todos los modelos
+df_1 <- extract_history_data(history_1, "NET-1")
+df_2 <- extract_history_data(history_2, "MLP")
+df_3 <- extract_history_data(history_3, "CNN Base")
+df_4 <- extract_history_data(history_4, "CNN BN")
+df_5 <- extract_history_data(history_5, "CNN GAP")
+
+# Combinar todos los datos
+df_all <- rbind(df_1, df_2, df_3, df_4, df_5)
+df_all$model <- factor(df_all$model, 
+                       levels = c("NET-1", "MLP", "CNN Base", "CNN BN", "CNN GAP"))
+
+# Separar accuracy y loss
+df_accuracy <- df_all %>% filter(metric %in% c("Train Accuracy", "Val Accuracy"))
+df_loss <- df_all %>% filter(metric %in% c("Train Loss", "Val Loss"))
+
+# Configurar colores y estilos
+model_colors <- c("NET-1" = "#E41A1C", "MLP" = "#377EB8", "CNN Base" = "#4DAF4A",
+                  "CNN BN" = "#984EA3", "CNN GAP" = "#FF7F00")
+
+# Plot de Accuracy
+p_accuracy <- ggplot(df_accuracy, aes(x = epoch, y = value, color = model, linetype = metric)) +
+  geom_line(linewidth = 0.8) +
+  scale_color_manual(values = model_colors) +
+  scale_linetype_manual(values = c("Train Accuracy" = "solid", "Val Accuracy" = "dashed")) +
+  labs(
+    title = "Evolución de Accuracy durante el Entrenamiento",
+    x = "Época",
+    y = "Accuracy",
+    color = "Modelo",
+    linetype = "Conjunto"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    axis.title = element_text(size = 10),
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 9, face = "bold")
+  ) +
+  ylim(0.45, 1.0)
+
+# Plot de Loss
+p_loss <- ggplot(df_loss, aes(x = epoch, y = value, color = model, linetype = metric)) +
+  geom_line(linewidth = 0.8) +
+  scale_color_manual(values = model_colors) +
+  scale_linetype_manual(values = c("Train Loss" = "solid", "Val Loss" = "dashed")) +
+  labs(
+    title = "Evolución de Pérdida (Loss) durante el Entrenamiento",
+    x = "Época",
+    y = "Binary Cross-Entropy Loss",
+    color = "Modelo",
+    linetype = "Conjunto"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    axis.title = element_text(size = 10),
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 9, face = "bold")
+  ) +
+  ylim(0, 1.2)
+
+# Combinar ambos plots
+p_combined <- grid.arrange(p_accuracy, p_loss, ncol = 1)
+
+ggsave(file.path(data_dir, "figura_curvas_aprendizaje.png"), plot = p_combined, 
+       width = 10, height = 10, dpi = 300)
+
+cat("\n✓ Figura 4 generada: 'figura4_curvas_aprendizaje.png'\n")
 
 # =============================================================================
-# Parte 3: Análisis Crítico, Visualizaciones y Generación de Figuras
+# 1. Test de McNemar
 # =============================================================================
+
+# 1. Obtener predicciones y etiquetas reales por lotes
+all_y_true <- c()
+all_mlp_preds <- c()
+all_cnn_preds <- c()
+
+iter <- as_iterator(validation_dataset)
+
+while(TRUE) {
+  batch <- iter_next(iter)
+  if (is.null(batch)) break
+  
+  # Imágenes y etiquetas del lote
+  x_batch <- batch[[1]]
+  y_batch <- as.array(batch[[2]])
+  
+  # Predicciones (0 o 1)
+  p_mlp <- as.numeric(predict(model_2, x_batch, verbose = 0) > 0.5)
+  p_cnn <- as.numeric(predict(model_3, x_batch, verbose = 0) > 0.5)
+  
+  # Acumular resultados
+  all_y_true <- c(all_y_true, y_batch)
+  all_mlp_preds <- c(all_mlp_preds, p_mlp)
+  all_cnn_preds <- c(all_cnn_preds, p_cnn)
+}
+
+# 2. Determinar si acertaron o no
+mlp_correct <- (all_mlp_preds == all_y_true)
+cnn_correct <- (all_cnn_preds == all_y_true)
+
+# 3. Construir la matriz para McNemar
+# n10: Acierta MLP pero falla CNN | n01: Falla MLP pero acierta CNN
+n11 <- sum(mlp_correct & cnn_correct)
+n10 <- sum(mlp_correct & !cnn_correct)
+n01 <- sum(!mlp_correct & cnn_correct)
+n00 <- sum(!mlp_correct & !cnn_correct)
+
+mcnemar_matrix <- matrix(c(n11, n01, n10, n00), 
+                         nrow = 2,
+                         dimnames = list("MLP" = c("Correcto", "Error"),
+                                         "CNN" = c("Correcto", "Error")))
+
+# 4. Mostrar y ejecutar el test
+print("=== TABLA DE CONTINGENCIA ===")
+print(mcnemar_matrix)
+
+mcnemar_result <- mcnemar.test(mcnemar_matrix, correct = TRUE)
+print(mcnemar_result)
+
 
 # =============================================================================
 # 1. GRÁFICA COMPARATIVA DE APRENDIZAJE (Figura estilo 11.11 Hastie)
