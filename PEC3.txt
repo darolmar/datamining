@@ -4,7 +4,7 @@
 # =============================================================================
 
 # 1. Instalación de paquetes necesarios (incluyendo keras3)
-pacotes <- c("keras3", "tensorflow", "ggplot2", "gridExtra", "dplyr","tfdatasets","reshape2")
+pacotes <- c("keras3", "tensorflow", "ggplot2", "gridExtra", "dplyr","tfdatasets","reshape2","caret")
 new_packages <- pacotes[!(pacotes %in% installed.packages()[,"Package"])]
 if(length(new_packages)) install.packages(new_packages, dependencies = TRUE)
 
@@ -16,6 +16,7 @@ library(gridExtra)
 library(dplyr, warn.conflicts = FALSE)
 library(tfdatasets)
 library(reshape2)
+library(caret)
 
 # 3. Configuración inicial (Solo si no lo has hecho antes)
 #install_tensorflow()
@@ -591,6 +592,57 @@ saveRDS(history_5, file.path(data_dir, "history_5.rds"))
 # 9. COMPARACIÓN FINAL
 # =============================================================================
 
+# Función para contar parámetros
+count_params <- function(model) {
+  total_params <- sum(sapply(model$trainable_weights, function(w) {
+    prod(dim(w))
+  }))
+  return(total_params)
+}
+
+# Contar parámetros de cada modelo
+params_1 <- count_params(model_1)
+params_2 <- count_params(model_2)
+params_3 <- count_params(model_3)
+params_4 <- count_params(model_4)
+params_5 <- count_params(model_5)
+
+# Función para calcular F1-score
+calculate_f1 <- function(model, dataset) {
+  
+  # 1. Obtener predicciones (probabilidades)
+  predictions_prob <- predict(object = model, x = dataset, verbose = 0)
+  predictions_class <- ifelse(predictions_prob > 0.5, 1, 0)
+  
+  # 2. Extraer etiquetas verdaderas directamente del dataset
+  # Esto garantiza que el orden sea idéntico al de las predicciones
+  true_labels <- c()
+  it <- as_iterator(dataset)
+  
+  while (TRUE) {
+    batch <- iter_next(it)
+    if (is.null(batch)) break
+    
+    # El label suele estar en la segunda posición de la lista del batch: list(inputs, labels)
+    labels_vec <- as.array(batch[[2]])
+    true_labels <- c(true_labels, labels_vec)
+  }
+  
+  # 3. Calcular Matriz de Confusión y F1-Score con caret
+  cm <- confusionMatrix(
+    data = factor(predictions_class, levels = c(0, 1)),
+    reference = factor(true_labels, levels = c(0, 1)),
+    positive = "1"
+  )
+  
+  # Extraer la métrica F1
+  f1_score <- cm$byClass["F1"]
+  
+  # Limpiar nombres para devolver solo el valor numérico
+  return(as.numeric(f1_score))
+}
+cat("\n=== EVALUANDO EN CONJUNTO DE VALIDACIÓN ===\n")
+
 # Evaluación del modelo 1 en el dataset de validación y de test
 eval_1_val <- evaluate(
   object = model_1,
@@ -662,6 +714,74 @@ results_val <- data.frame(
 cat("\n--- RESULTADOS SOBRE VALIDACIÓN ---\n")
 print(results_val)
 
+# Calcular F1-scores
+cat("\n=== CALCULANDO F1-SCORES EN TEST ===\n")
+
+f1_1 <- calculate_f1(model_1, test_data)
+cat("Modelo 1 - F1 Score:", f1_1, "\n")
+
+f1_2 <- calculate_f1(model_2, test_data)
+cat("Modelo 2 - F1 Score:", f1_2, "\n")
+
+f1_3 <- calculate_f1(model_3, test_data)
+cat("Modelo 3 - F1 Score:", f1_3, "\n")
+
+f1_4 <- calculate_f1(model_4, test_data)
+cat("Modelo 4 - F1 Score:", f1_4, "\n")
+
+f1_5 <- calculate_f1(model_5, test_data)
+cat("Modelo 5 - F1 Score:", f1_5, "\n")
+
+# =============================================================================
+# TABLA 2: Consolidar resultados
+# =============================================================================
+
+tabla_2 <- data.frame(
+  Modelo = c("NET-1", "Modelo 2", "Modelo 3", "Modelo 4", "Modelo 5"),
+  Arquitectura = c(
+    "Logistic Regression",
+    "MLP (2 capas ocultas)",
+    "CNN Base",
+    "CNN + Batch Norm",
+    "CNN + Dropout + Aug"
+  ),
+  Parametros = c(params_1, params_2, params_3, params_4, params_5),
+  Val_Accuracy = c(
+    eval_1_val["accuracy"],
+    eval_2_val["accuracy"],
+    eval_3_val["accuracy"],
+    eval_4_val["accuracy"],
+    eval_5_val["accuracy"]
+  ),
+  Val_Loss = c(
+    eval_1_val["loss"],
+    eval_2_val["loss"],
+    eval_3_val["loss"],
+    eval_4_val["loss"],
+    eval_5_val["loss"]
+  ),
+  Test_Accuracy = c(
+    eval_1_test["accuracy"],
+    eval_2_test["accuracy"],
+    eval_3_test["accuracy"],
+    eval_4_test["accuracy"],
+    eval_5_test["accuracy"]
+  ),
+  Test_F1_Score = c(f1_1, f1_2, f1_3, f1_4, f1_5)
+)
+
+# Redondear valores
+tabla_2$Val_Accuracy <- round(tabla_2$Val_Accuracy, 4)
+tabla_2$Val_Loss <- round(tabla_2$Val_Loss, 4)
+tabla_2$Test_Accuracy <- round(tabla_2$Test_Accuracy, 4)
+tabla_2$Test_F1_Score <- round(tabla_2$Test_F1_Score, 4)
+
+cat("\n=== TABLA 2: MÉTRICAS DE DESEMPEÑO COMPARATIVO ===\n")
+print(tabla_2)
+
+# Guardar resultados
+saveRDS(tabla_2, file.path(data_dir, "tabla_2_metricas_desempeno.rds"))
+write.csv(tabla_2, file.path(data_dir, "tabla_2_metricas_desempeno.csv"), row.names = FALSE)
 
 # Función para extraer datos de historia
 extract_history_data <- function(history, model_name) {
@@ -750,253 +870,240 @@ p_loss <- ggplot(df_loss, aes(x = epoch, y = value, color = model, linetype = me
 # Combinar ambos plots
 p_combined <- grid.arrange(p_accuracy, p_loss, ncol = 1)
 
-ggsave(file.path(data_dir, "figura_curvas_aprendizaje.png"), plot = p_combined, 
+ggsave(file.path(data_dir, file.path(data_dir, "figura_curvas_aprendizaje.png")), plot = p_combined, 
        width = 10, height = 10, dpi = 300)
 
 cat("\n✓ Figura 4 generada: 'figura4_curvas_aprendizaje.png'\n")
 
 # =============================================================================
-# 1. Test de McNemar
+# Análisis cuantitativo del overfitting
 # =============================================================================
 
-# 1. Obtener predicciones y etiquetas reales por lotes
-all_y_true <- c()
-all_mlp_preds <- c()
-all_cnn_preds <- c()
-
-iter <- as_iterator(validation_dataset)
-
-while(TRUE) {
-  batch <- iter_next(iter)
-  if (is.null(batch)) break
-  
-  # Imágenes y etiquetas del lote
-  x_batch <- batch[[1]]
-  y_batch <- as.array(batch[[2]])
-  
-  # Predicciones (0 o 1)
-  p_mlp <- as.numeric(predict(model_2, x_batch, verbose = 0) > 0.5)
-  p_cnn <- as.numeric(predict(model_3, x_batch, verbose = 0) > 0.5)
-  
-  # Acumular resultados
-  all_y_true <- c(all_y_true, y_batch)
-  all_mlp_preds <- c(all_mlp_preds, p_mlp)
-  all_cnn_preds <- c(all_cnn_preds, p_cnn)
+# Calcular brecha train-val al final del entrenamiento
+calculate_gap <- function(history) {
+  final_train_acc <- tail(history$metrics$accuracy, 1)
+  final_val_acc <- tail(history$metrics$val_accuracy, 1)
+  gap <- final_train_acc - final_val_acc
+  return(gap)
 }
 
-# 2. Determinar si acertaron o no
-mlp_correct <- (all_mlp_preds == all_y_true)
-cnn_correct <- (all_cnn_preds == all_y_true)
-
-# 3. Construir la matriz para McNemar
-# n10: Acierta MLP pero falla CNN | n01: Falla MLP pero acierta CNN
-n11 <- sum(mlp_correct & cnn_correct)
-n10 <- sum(mlp_correct & !cnn_correct)
-n01 <- sum(!mlp_correct & cnn_correct)
-n00 <- sum(!mlp_correct & !cnn_correct)
-
-mcnemar_matrix <- matrix(c(n11, n01, n10, n00), 
-                         nrow = 2,
-                         dimnames = list("MLP" = c("Correcto", "Error"),
-                                         "CNN" = c("Correcto", "Error")))
-
-# 4. Mostrar y ejecutar el test
-print("=== TABLA DE CONTINGENCIA ===")
-print(mcnemar_matrix)
-
-mcnemar_result <- mcnemar.test(mcnemar_matrix, correct = TRUE)
-print(mcnemar_result)
-
-
-# =============================================================================
-# 1. GRÁFICA COMPARATIVA DE APRENDIZAJE (Figura estilo 11.11 Hastie)
-# =============================================================================
-
-# Cargar historiales de entrenamiento
-history_1 <- readRDS(file.path(data_dir,"history_1.rds"))
-history_2 <- readRDS(file.path(data_dir,"history_2.rds"))
-history_3 <- readRDS(file.path(data_dir,"history_3.rds"))
-history_4 <- readRDS(file.path(data_dir,"history_4.rds"))
-history_5 <- readRDS(file.path(data_dir,"history_5.rds"))
-
-# Función para extraer métricas en formato tidy
-extract_metrics <- function(history, model_name) {
-  epochs <- seq_along(history$metrics$loss)
-  
-  data.frame(
-    epoch = epochs,
-    model = model_name,
-    train_loss = history$metrics$loss,
-    val_loss = history$metrics$val_loss,
-    train_acc = history$metrics$accuracy,
-    val_acc = history$metrics$val_accuracy
+overfitting_gaps <- data.frame(
+  Modelo = c("NET-1", "MLP", "CNN Base", "CNN + BatchNorm", "CNN + Dropout + Aug"),
+  Gap = c(
+    calculate_gap(history_1),
+    calculate_gap(history_2),
+    calculate_gap(history_3),
+    calculate_gap(history_4),
+    calculate_gap(history_5)
   )
-}
-
-# Consolidar todos los modelos
-all_metrics <- rbind(
-  extract_metrics(history_1, "NET-1 (sin capa oculta)"),
-  extract_metrics(history_2, "MLP (con capas ocultas)"),
-  extract_metrics(history_3, "CNN Base"),
-  extract_metrics(history_4, "CNN + Batch Norm"),
-  extract_metrics(history_5, "CNN + GAP")
 )
 
-# GRÁFICA 1: Loss de Validación (principal para la memoria)
-plot_val_loss <- ggplot(all_metrics, aes(x = epoch, y = val_loss, 
-                                          color = model, linetype = model)) +
-  geom_line(size = 1) +
-  labs(
-    title = "Evolución del Loss en Validación",
-    subtitle = "Comparación de los 5 modelos (menor es mejor)",
-    x = "Época",
-    y = "Binary Crossentropy Loss",
-    color = "Modelo",
-    linetype = "Modelo"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    legend.position = "bottom",
-    legend.direction = "vertical",
-    plot.title = element_text(face = "bold", size = 14),
-    panel.grid.minor = element_blank()
-  ) +
-  scale_color_brewer(palette = "Set1")
-
-print(plot_val_loss)
-ggsave( filename = file.path(data_dir, "figura_loss_validacion.png"), plot = plot_val_loss, width = 10, height = 6, dpi = 300 )
-
-# GRÁFICA 2: Accuracy de Validación
-plot_val_acc <- ggplot(all_metrics, aes(x = epoch, y = val_acc, 
-                                         color = model, linetype = model)) +
-  geom_line(size = 1) +
-  labs(
-    title = "Evolución del Accuracy en Validación",
-    subtitle = "Comparación de los 5 modelos (mayor es mejor)",
-    x = "Época",
-    y = "Accuracy",
-    color = "Modelo",
-    linetype = "Modelo"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    legend.position = "bottom",
-    legend.direction = "vertical",
-    plot.title = element_text(face = "bold", size = 14),
-    panel.grid.minor = element_blank()
-  ) +
-  scale_color_brewer(palette = "Set1") +
-  ylim(0.5, 1.0)
-
-print(plot_val_acc)
-ggsave( filename = file.path(data_dir, "figura_accuracy_validacion.png"), plot = plot_val_acc, width = 10, height = 6, dpi = 300 )
-
-# GRÁFICA 3: Train vs Validation (para detectar overfitting)
-# Seleccionar el mejor modelo (ej: modelo 5)
-best_model_data <- all_metrics %>% 
-  filter(model == "CNN + GAP") %>%
-  select(epoch, train_loss, val_loss, train_acc, val_acc) %>%
-  melt(id.vars = "epoch")
-
-# Separar loss y accuracy
-overfitting_loss <- best_model_data %>%
-  filter(variable %in% c("train_loss", "val_loss"))
-
-overfitting_acc <- best_model_data %>%
-  filter(variable %in% c("train_acc", "val_acc"))
-
-plot_overfitting <- ggplot(overfitting_loss, aes(x = epoch, y = value, 
-                                                  color = variable, linetype = variable)) +
-  geom_line(size = 1.2) +
-  labs(
-    title = "Análisis de Overfitting: CNN + GAP",
-    subtitle = "Comparación Train vs Validación (Loss)",
-    x = "Época",
-    y = "Binary Crossentropy Loss",
-    color = "Conjunto",
-    linetype = "Conjunto"
-  ) +
-  theme_minimal(base_size = 12) +
-  scale_color_manual(
-    values = c("train_loss" = "blue", "val_loss" = "red"),
-    labels = c("Entrenamiento", "Validación")
-  ) +
-  scale_linetype_manual(
-    values = c("train_loss" = "solid", "val_loss" = "dashed"),
-    labels = c("Entrenamiento", "Validación")
-  ) +
-  theme(legend.position = "bottom")
-
-print(plot_overfitting)
-ggsave(
-  filename = file.path(data_dir, "figura_overfitting_analysis.png"), 
-  plot = plot_val_loss, 
-  width = 10, 
-  height = 6, 
-  dpi = 300
-)
-cat("✓ Gráficas comparativas generadas\n\n")
+cat("\n=== ANÁLISIS DE BRECHA TRAIN-VAL (OVERFITTING) ===\n")
+print(overfitting_gaps)
+cat("\nInterpretación: Brechas menores indican mejor generalización.\n")
 
 # =============================================================================
-# 2. ANÁLISIS DE PESOS: Primera Capa Convolucional
+# MATRICES DE CONFUSIÓN Y MÉTRICAS ADICIONALES
 # =============================================================================
 
-cat("=== VISUALIZACIÓN DE PESOS (Filtros Conv) ===\n")
-
-# 1. Cargar modelo CNN base (modelo 3) # 
-model_cnn <- load_model(file.path(data_dir,"model_3_cnn_base.keras"))
-# 2. Extraer la primera capa CONVOLUCIONAL (buscándola por nombre o tipo para evitar errores de índice) 
-# Si sabes que es la primera capa, usa index = 1L (con L de integer) 
-first_conv_layer <- get_layer(model_cnn, index = 1L) 
-# 3. Extraer pesos 
-weights <- get_weights(first_conv_layer)
-filters <- weights[[1]] # El primer elemento son los pesos, el segundo los bias 
-# 4. Mostrar información
-cat("Dimensiones de los filtros:", paste(dim(filters), collapse = " x "), "\n")
-cat("Número de filtros en primera capa:", dim(filters)[4], "\n")
-
-# Función para visualizar filtros
-plot_conv_filters <- function(filters, n_filters = 32, ncol = 8) {
-  # Normalizar filtros para visualización
-  f_min <- min(filters)
-  f_max <- max(filters)
-  filters_norm <- (filters - f_min) / (f_max - f_min)
+# Función para calcular métricas detalladas
+calculate_detailed_metrics <- function(model, dataset) {
   
-  n_filters <- min(n_filters, dim(filters)[4])
-  nrow <- ceiling(n_filters / ncol)
+  # 1. Obtener predicciones (Keras 3 maneja el dataset automáticamente)
+  # Devuelve probabilidades (sigmoid)
+  predictions_prob <- predict(model, dataset)
+  predictions_class <- ifelse(predictions_prob > 0.5, 1, 0)
   
-  par(mfrow = c(nrow, ncol), mar = c(0.5, 0.5, 1, 0.5))
-  
-  for(i in 1:n_filters) {
-    filter_img <- filters_norm[,,1,i]
-    image(t(filter_img[nrow(filter_img):1,]), 
-          col = gray.colors(256),
-          axes = FALSE,
-          main = paste("F", i, sep = ""),
-          cex.main = 0.8)
+  # 2. Extraer etiquetas reales del dataset para garantizar alineación absoluta
+  # Iteramos el dataset para recolectar los labels (y)
+  true_labels <- c()
+  it <- as_iterator(dataset)
+  while (TRUE) {
+    batch <- iter_next(it)
+    if (is.null(batch)) break
+    # batch[[2]] son las etiquetas. Convertimos de tensor a vector R.
+    labels_vec <- as.array(batch[[2]])
+    true_labels <- c(true_labels, labels_vec)
   }
-  par(mfrow = c(1, 1))
+  
+  # 3. Matriz de confusión con caret
+  cm <- confusionMatrix(
+    factor(predictions_class, levels = c(0, 1)),
+    factor(true_labels, levels = c(0, 1)),
+    positive = "1"
+  )
+  
+  return(list(
+    confusion_matrix = cm$table,
+    accuracy = cm$overall["Accuracy"],
+    precision = cm$byClass["Precision"],
+    recall = cm$byClass["Recall"],
+    specificity = cm$byClass["Specificity"],
+    f1 = cm$byClass["F1"]
+  ))
 }
 
-# Visualizar los 32 filtros de la primera capa
-png(file.path(data_dir, "figura_filtros_conv1.png"), width = 2400, height = 1200, res = 300)
+# Calcular métricas (usando el objeto test_dataset que creamos previamente)
+metrics_1 <- calculate_detailed_metrics(model_1, test_dataset)
+metrics_2 <- calculate_detailed_metrics(model_2, test_dataset)
+metrics_3 <- calculate_detailed_metrics(model_3, test_dataset)
+metrics_4 <- calculate_detailed_metrics(model_4, test_dataset)
+metrics_5 <- calculate_detailed_metrics(model_5, test_dataset)
 
-plot_conv_filters(filters, n_filters = 32, ncol = 8)
-dev.off()
+# Consolidar resultados en Dataframe
+detailed_results <- data.frame(
+  Modelo = c("NET-1", "MLP", "CNN Base", "CNN BN", "CNN GAP"),
+  Accuracy = c(metrics_1$accuracy, metrics_2$accuracy, metrics_3$accuracy, 
+               metrics_4$accuracy, metrics_5$accuracy),
+  Precision = c(metrics_1$precision, metrics_2$precision, metrics_3$precision, 
+                metrics_4$precision, metrics_5$precision),
+  Recall = c(metrics_1$recall, metrics_2$recall, metrics_3$recall, 
+             metrics_4$recall, metrics_5$recall),
+  Specificity = c(metrics_1$specificity, metrics_2$specificity, metrics_3$specificity, 
+                  metrics_4$specificity, metrics_5$specificity),
+  F1_Score = c(metrics_1$f1, metrics_2$f1, metrics_3$f1, metrics_4$f1, metrics_5$f1)
+)
 
-cat("✓ Filtros de convolución visualizados y guardados\n\n")
+print(detailed_results)
+saveRDS(detailed_results, "detailed_metrics.rds")
 
-# Estadísticas de los filtros
-cat("Análisis estadístico de los filtros:\n")
-cat("Media de pesos:", mean(filters), "\n")
-cat("Desviación estándar:", sd(filters), "\n")
-cat("Rango:", range(filters), "\n\n")
+plot_confusion_matrix <- function(cm, title) {
+  cm_df <- as.data.frame(cm)
+  colnames(cm_df) <- c("Prediccion", "Real", "Frecuencia")
+  
+  ggplot(cm_df, aes(x = Real, y = Prediccion, fill = Frecuencia)) +
+    geom_tile() +
+    geom_text(aes(label = Frecuencia), size = 6, color = "white", fontface = "bold") +
+    scale_fill_gradient(low = "steelblue", high = "darkred") +
+    labs(title = title, x = "Clase Real", y = "Clase Predicha") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      axis.text = element_text(size = 10)
+    )
+}
+
+p_cm1 <- plot_confusion_matrix(metrics_1$confusion_matrix, "NET-1")
+p_cm2 <- plot_confusion_matrix(metrics_2$confusion_matrix, "MLP")
+p_cm3 <- plot_confusion_matrix(metrics_3$confusion_matrix, "CNN Base")
+p_cm4 <- plot_confusion_matrix(metrics_4$confusion_matrix, "CNN BN")
+p_cm5 <- plot_confusion_matrix(metrics_5$confusion_matrix, "CNN GAP")
+
+# Organizar en rejilla y guardar
+p_cm_all <- grid.arrange(p_cm1, p_cm2, p_cm3, p_cm4, p_cm5, ncol = 3)
+ggsave(file.path(data_dir, "figura5_confusion_matrices.png"), plot = p_cm_all, width = 14, height = 10, dpi = 300)
+
+# Consolidar Tabla 3
+tabla_3 <- rbind(metrics_1, metrics_2, metrics_3, metrics_4, metrics_5)
+
+cat("\n=== TABLA 3: MATRICES DE CONFUSIÓN Y MÉTRICAS DETALLADAS ===\n")
+print(tabla_3)
+
+# =============================================================================
+# VISUALIZACIÓN DE FILTROS CONVOLUCIONALES
+# =============================================================================
+
+# 1. Función para extraer pesos (robusta)
+extract_conv_weights <- function(model, layer_name) {
+  layer <- get_layer(model, layer_name)
+  weights <- get_weights(layer)
+  return(weights[[1]]) # El elemento 1 son los kernels/filtros
+}
+
+# 2. Identificación dinámica de capas
+# Esto evita el error "No such layer" al buscar los nombres reales
+conv_layer_names <- c()
+for (layer in model_3$layers) {
+  if (grepl("conv2d", layer$name)) {
+    conv_layer_names <- c(conv_layer_names, layer$name)
+  }
+}
+
+cat("Capas convolucionales detectadas:", paste(conv_layer_names, collapse = ", "), "\n")
+
+# 3. Función de visualización optimizada
+plot_conv_filters <- function(filters, n_filters = 32, title = "Filtros") {
+  dims <- dim(filters)
+  # dims[1]: height, dims[2]: width, dims[3]: in_channels, dims[4]: out_channels
+  n_channels <- dims[3]
+  total_out <- dims[4]
+  n_to_plot <- min(n_filters, total_out)
+  
+  # Configurar rejilla
+  side <- ceiling(sqrt(n_to_plot))
+  par(mfrow = c(side, side), 
+      mar = c(0.1, 0.1, 1.2, 0.1), 
+      oma = c(0, 0, 3, 0))
+  
+  for (i in 1:n_to_plot) {
+    if (n_channels == 1) {
+      # Primera capa (Blanco y negro / 1 canal)
+      img <- filters[, , 1, i]
+    } else {
+      # Capas profundas (Promediamos canales de entrada)
+      img <- apply(filters[, , , i], c(1, 2), mean)
+    }
+    
+    # Normalización para contraste visual
+    img <- (img - min(img)) / (max(img) - min(img) + 1e-7)
+    
+    # Dibujar
+    image(t(img[nrow(img):1, ]), 
+          col = gray.colors(256), 
+          axes = FALSE, 
+          main = paste(i), 
+          cex.main = 0.6)
+    box(col = "gray70")
+  }
+  mtext(title, outer = TRUE, cex = 1.2, font = 2)
+}
+
+# 4. Bucle de generación automática de imágenes
+# Este bloque recorre todas las capas detectadas y guarda una imagen por capa
+for (i in seq_along(conv_layer_names)) {
+  layer_name <- conv_layer_names[i]
+  filters <- extract_conv_weights(model_3, layer_name)
+  
+  filename <- paste0("figura6_filtros_", layer_name, ".png")
+  full_path <- file.path(data_dir, filename)  
+  png(full_path, width = 1200, height = 1200, res = 150)
+  plot_conv_filters(filters, 
+                    n_filters = 32, 
+                    title = paste("Capa:", layer_name, "- Filtros extraídos"))
+  dev.off()
+  
+  cat("✓ Guardada visualización para:", layer_name, "en", full_path, "\n")
+}
+
+# 5. Análisis estadístico (Consolidado)
+filter_stats_list <- list()
+
+for (name in conv_layer_names) {
+  f <- extract_conv_weights(model_3, name)
+  f_means <- apply(f, 4, mean)
+  f_sds <- apply(f, 4, sd)
+  
+  df_temp <- data.frame(
+    layer = name,
+    mean_weight = mean(f_means),
+    sd_weight = mean(f_sds)
+  )
+  filter_stats_list[[name]] <- df_temp
+}
+
+filter_stats_final <- do.call(rbind, filter_stats_list)
+print(filter_stats_final)
+saveRDS(filter_stats_final, file.path(data_dir, "filter_statistics.rds"))
+
+cat("\n✓ Visualización y análisis completados.\n")
 
 # =============================================================================
 # 3. VISUALIZACIÓN DE MAPAS DE CARACTERÍSTICAS (Feature Maps)
 # =============================================================================
 
 cat("=== MAPAS DE CARACTERÍSTICAS ===\n")
+#Cargamos el modelo
+model_cnn <- model_3
 
 # Cargar metadata y seleccionar una imagen de test
 metadata <- readRDS(file.path(data_dir,"dataset_metadata.rds"))
@@ -1009,9 +1116,9 @@ sample_class_b <- test_data %>% filter(label == 1) %>% slice(1)
 # Función para extraer mapas de características
 get_feature_maps <- function(model, image_path, layer_indices) {
   # 1. Cargar y preparar la imagen
-  img <- image_load(image_path, target_size = c(100, 100), color_mode = "grayscale")
+  img <- image_load(image_path, target_size = c(IMG_HEIGHT, IMG_WIDTH), color_mode = "grayscale")
   img_array <- image_to_array(img)
-  img_array <- array_reshape(img_array, c(1, 100, 100, 1))
+  img_array <- array_reshape(img_array, c(1, IMG_HEIGHT, IMG_WIDTH, 1))
   img_array <- img_array / 255 # Normalización manual
   
   # 2. Extraer las salidas de las capas deseadas
@@ -1030,10 +1137,7 @@ get_feature_maps <- function(model, image_path, layer_indices) {
 # Extraer feature maps para una imagen de Clase A
 cat("Extrayendo feature maps para Clase A...\n")
 # 1. Asegurar que las dimensiones son enteros (L)
-img_size_dims <- c(1L, 100L, 100L, 1L) 
-
-# 2. Forzar la construcción física del modelo
-model_cnn$build(input_shape = img_size_dims)
+img_size_dims <- c(1L, IMG_HEIGHT, IMG_WIDTH, 1L) 
 
 # 3. Crear un tensor de prueba y pasarlo por el modelo 
 # Usamos predict() porque es la forma más oficial de 'llamar' al modelo
@@ -1068,22 +1172,22 @@ plot_feature_maps <- function(activation, layer_name, n_features = 16, ncol = 4)
 }
 
 # Visualizar mapas de la primera capa convolucional
-png(file.path(data_dir, "figura_feature_maps_conv1.png"), width = 2000, height = 2000, res = 300)
-plot_feature_maps(feature_maps_a$activations[[1]], "Conv1 (32 filtros)", 
+png(file.path(data_dir, "figura7_feature_maps_conv1.png"), width = 2000, height = 2000, res = 300)
+plot_feature_maps(feature_maps_a[[1]], "Conv1 (32 filtros)", 
                   n_features = 16, ncol = 4)
 dev.off()
 
 # Visualizar mapas de la segunda capa convolucional
-png(file.path(data_dir, "figura_feature_maps_conv2.png"), width = 2000, height = 2000, res = 300)
+png(file.path(data_dir, "figura7_feature_maps_conv2.png"), width = 2000, height = 2000, res = 300)
 
-plot_feature_maps(feature_maps_a$activations[[2]], "Conv2 (64 filtros)", 
+plot_feature_maps(feature_maps_a[[2]], "Conv2 (64 filtros)", 
                   n_features = 16, ncol = 4)
 dev.off()
 
 # Visualizar mapas de la tercera capa convolucional
-png(file.path(data_dir, "figura_feature_maps_conv3.png"), width = 2000, height = 2000, res = 300)
+png(file.path(data_dir, "figura7_feature_maps_conv3.png"), width = 2000, height = 2000, res = 300)
 
-plot_feature_maps(feature_maps_a$activations[[3]], "Conv3 (128 filtros)", 
+plot_feature_maps(feature_maps_a[[3]], "Conv3 (128 filtros)", 
                   n_features = 16, ncol = 4)
 dev.off()
 
@@ -1094,39 +1198,56 @@ cat("✓ Feature maps generados para todas las capas convolucionales\n\n")
 # =============================================================================
 
 cat("Extrayendo feature maps para Clase B (comparación)...\n")
-feature_maps_b <- get_feature_maps(model_cnn, sample_class_b$image_path, 
+
+# Extraer usando la función que ya adaptamos para Keras 3
+feature_maps_b <- get_feature_maps(model_cnn, 
+                                   sample_class_b$image_path, 
                                    layer_indices = c(1, 3, 5))
 
 # Visualización comparativa: misma capa, ambas clases
-png("figura_comparacion_clases.png", width = 3000, height = 1500, res = 300)
+# Guardamos en el directorio data_path definido anteriormente
+png(file.path(data_dir, "figura_comparacion_clases_feature_maps.png"), width = 3000, height = 1500, res = 300)
 par(mfrow = c(2, 8), mar = c(0.5, 0.5, 1.5, 0.5))
 
-# Primera fila: Clase A
+# --- Primera fila: Clase A ---
+# Usamos [[1]] directamente, que corresponde a la primera capa solicitada
 for(i in 1:8) {
-  feature_a <- feature_maps_a$activations[[1]][1,,,i]
-  feature_a <- (feature_a - min(feature_a)) / (max(feature_a) - min(feature_a))
-  image(t(feature_a[nrow(feature_a):1,]), 
-        col = gray.colors(256),
-        axes = FALSE,
-        main = paste("Clase A - F", i),
+  # Acceso directo al tensor: [batch, alto, ancho, canal]
+  feature_a <- feature_maps_a[[1]][1, , , i]
+  
+  # Normalización segura (+ 1e-8 evita el error de Inf si el mapa está vacío)
+  f_min <- min(feature_a)
+  f_max <- max(feature_a)
+  feature_a <- (feature_a - f_min) / (f_max - f_min + 1e-8)
+  
+  image(t(feature_a[nrow(feature_a):1, ]), 
+        col = gray.colors(256), 
+        axes = FALSE, 
+        main = paste("Clase A - F", i), 
         cex.main = 0.7)
 }
 
-# Segunda fila: Clase B
+# --- Segunda fila: Clase B ---
 for(i in 1:8) {
-  feature_b <- feature_maps_b$activations[[1]][1,,,i]
-  feature_b <- (feature_b - min(feature_b)) / (max(feature_b) - min(feature_b))
-  image(t(feature_b[nrow(feature_b):1,]), 
-        col = gray.colors(256),
-        axes = FALSE,
-        main = paste("Clase B - F", i),
+  # Acceso directo al tensor
+  feature_b <- feature_maps_b[[1]][1, , , i]
+  
+  # Normalización segura
+  f_min <- min(feature_b)
+  f_max <- max(feature_b)
+  feature_b <- (feature_b - f_min) / (f_max - f_min + 1e-8)
+  
+  image(t(feature_b[nrow(feature_b):1, ]), 
+        col = gray.colors(256), 
+        axes = FALSE, 
+        main = paste("Clase B - F", i), 
         cex.main = 0.7)
 }
 
 par(mfrow = c(1, 1))
 dev.off()
 
-cat("✓ Comparación de feature maps entre clases completada\n\n")
+cat("✓ Comparación de feature maps guardada en figura_comparacion_clases_feature_maps.png\n")
 
 # =============================================================================
 # 5. TABLA RESUMEN DE RESULTADOS FINALES
@@ -1164,464 +1285,3 @@ best_model_idx <- which.max(final_results$Val_Acc)
 cat("\n✓ MEJOR MODELO:", model_names[best_model_idx], "\n")
 cat("  - Val Accuracy:", final_results$Val_Acc[best_model_idx], "\n")
 cat("  - Gap (overfitting):", final_results$Gap[best_model_idx], "\n\n")
-
-# =============================================================================
-# 6. ANÁLISIS DE IMPACTO DE DATA AUGMENTATION
-# =============================================================================
-
-cat("=== IMPACTO DE DATA AUGMENTATION ===\n")
-
-# Entrenar CNN Base SIN augmentation para comparar
-cat("Nota: Para análisis completo de augmentation, entrenar modelo 3\n")
-cat("      una vez sin augmentation y comparar resultados.\n\n")
-
-# Comparación cualitativa (basada en gap train-val)
-augmentation_analysis <- data.frame(
-  Aspecto = c("Overfitting (Gap)", "Val Accuracy", "Convergencia"),
-  Sin_Aug = c("Alto", "Puede ser mayor inicialmente", "Más rápida"),
-  Con_Aug = c("Bajo", "Más estable y generalizable", "Más lenta pero robusta")
-)
-
-print(augmentation_analysis)
-
-cat("\n✓ Análisis completado. Todas las figuras guardadas.\n")
-cat("\nARCHIVOS GENERADOS:\n")
-cat("  - figura_loss_validacion.png\n")
-cat("  - figura_accuracy_validacion.png\n")
-cat("  - figura_overfitting_analysis.png\n")
-cat("  - figura_filtros_conv1.png\n")
-cat("  - figura_feature_maps_conv1.png\n")
-cat("  - figura_feature_maps_conv2.png\n")
-cat("  - figura_feature_maps_conv3.png\n")
-cat("  - figura_comparacion_clases.png\n")
-cat("  - tabla_resultados_finales.csv\n")
-
-# =============================================================================
-# GRÁFICA COMPARATIVA: MODELOS 1, 2 Y 3
-# Análisis de progresión arquitectónica (NET-1 → MLP → CNN)
-# =============================================================================
-
-library(ggplot2)
-library(dplyr)
-library(reshape2)
-library(gridExtra)
-
-# Configurar directorio
-data_dir <- "/Users/darolmar/Desktop/anuka1200"
-
-# =============================================================================
-# 1. CARGAR HISTORIALES DE ENTRENAMIENTO
-# =============================================================================
-
-cat("Cargando historiales de entrenamiento...\n")
-
-history_1 <- readRDS(file.path(data_dir, "history_1.rds"))
-history_2 <- readRDS(file.path(data_dir, "history_2.rds"))
-history_3_no_aug <- readRDS(file.path(data_dir, "history_3_no_aug.rds"))
-history_3_aug <- readRDS(file.path(data_dir, "history_3.rds"))
-
-# Función para extraer métricas en formato tidy
-extract_metrics <- function(history, model_name) {
-  epochs <- seq_along(history$metrics$loss)
-  
-  data.frame(
-    epoch = epochs,
-    model = model_name,
-    train_loss = history$metrics$loss,
-    val_loss = history$metrics$val_loss,
-    train_acc = history$metrics$accuracy,
-    val_acc = history$metrics$val_accuracy
-  )
-}
-
-# Consolidar modelos 1, 2, 3 (sin augmentation) y 3 (con augmentation)
-all_metrics <- rbind(
-  extract_metrics(history_1, "Modelo 1: NET-1"),
-  extract_metrics(history_2, "Modelo 2: MLP"),
-  extract_metrics(history_3_no_aug, "Modelo 3: CNN (sin aug)"),
-  extract_metrics(history_3_aug, "Modelo 3: CNN (con aug)")
-)
-
-cat("✓ Historiales cargados\n\n")
-
-# =============================================================================
-# 2. GRÁFICA PRINCIPAL: ACCURACY DE VALIDACIÓN (Progresión arquitectónica)
-# =============================================================================
-
-cat("Generando gráfica de accuracy en validación...\n")
-
-# Paleta de colores académica
-colores <- c(
-  "Modelo 1: NET-1" = "#E41A1C",           # Rojo
-  "Modelo 2: MLP" = "#377EB8",             # Azul
-  "Modelo 3: CNN (sin aug)" = "#4DAF4A",   # Verde oscuro
-  "Modelo 3: CNN (con aug)" = "#984EA3"    # Púrpura
-)
-
-plot_accuracy_progresion <- ggplot(all_metrics, 
-                                   aes(x = epoch, y = val_acc, 
-                                       color = model, linetype = model)) +
-  geom_line(size = 1.2) +
-  
-  # Línea horizontal en el mejor resultado (para referencia)
-  geom_hline(yintercept = 0.9271, linetype = "dashed", 
-             color = "gray30", alpha = 0.5) +
-  annotate("text", x = 45, y = 0.935, 
-           label = "Mejor resultado: 92.71%", 
-           size = 3.5, color = "gray30") +
-  
-  # Estilo y etiquetas
-  labs(
-    title = "Progresión Arquitectónica: NET-1 → MLP → CNN",
-    subtitle = "Evolución del accuracy de validación durante entrenamiento",
-    x = "Época",
-    y = "Validation Accuracy",
-    color = "Arquitectura",
-    linetype = "Arquitectura"
-  ) +
-  
-  # Tema académico
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
-    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "gray40"),
-    legend.position = "bottom",
-    legend.direction = "vertical",
-    legend.title = element_text(face = "bold"),
-    panel.grid.minor = element_blank(),
-    panel.grid.major = element_line(color = "gray90"),
-    axis.title = element_text(face = "bold")
-  ) +
-  
-  # Colores personalizados
-  scale_color_manual(values = colores) +
-  scale_linetype_manual(values = c(
-    "Modelo 1: NET-1" = "solid",
-    "Modelo 2: MLP" = "solid",
-    "Modelo 3: CNN (sin aug)" = "solid",
-    "Modelo 3: CNN (con aug)" = "dashed"
-  )) +
-  
-  # Escala del eje Y
-  scale_y_continuous(
-    limits = c(0.5, 1.0),
-    breaks = seq(0.5, 1.0, 0.1),
-    labels = scales::percent_format(accuracy = 1)
-  ) +
-  
-  # Escala del eje X
-  scale_x_continuous(breaks = seq(0, 50, 10))
-
-print(plot_accuracy_progresion)
-
-# Guardar en alta resolución
-ggsave(
-  filename = file.path(data_dir, "figura_comparativa_modelos_123.png"),
-  plot = plot_accuracy_progresion,
-  width = 12,
-  height = 7,
-  dpi = 300
-)
-
-cat("✓ Gráfica principal guardada\n\n")
-
-# =============================================================================
-# 3. GRÁFICA SECUNDARIA: LOSS DE VALIDACIÓN
-# =============================================================================
-
-cat("Generando gráfica de loss en validación...\n")
-
-plot_loss_progresion <- ggplot(all_metrics, 
-                               aes(x = epoch, y = val_loss, 
-                                   color = model, linetype = model)) +
-  geom_line(size = 1.2) +
-  
-  labs(
-    title = "Progresión del Loss en Validación",
-    subtitle = "Binary Crossentropy Loss (menor es mejor)",
-    x = "Época",
-    y = "Validation Loss",
-    color = "Arquitectura",
-    linetype = "Arquitectura"
-  ) +
-  
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
-    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "gray40"),
-    legend.position = "bottom",
-    legend.direction = "vertical",
-    legend.title = element_text(face = "bold"),
-    panel.grid.minor = element_blank(),
-    panel.grid.major = element_line(color = "gray90"),
-    axis.title = element_text(face = "bold")
-  ) +
-  
-  scale_color_manual(values = colores) +
-  scale_linetype_manual(values = c(
-    "Modelo 1: NET-1" = "solid",
-    "Modelo 2: MLP" = "solid",
-    "Modelo 3: CNN (sin aug)" = "solid",
-    "Modelo 3: CNN (con aug)" = "dashed"
-  )) +
-  
-  scale_x_continuous(breaks = seq(0, 50, 10))
-
-print(plot_loss_progresion)
-
-ggsave(
-  filename = file.path(data_dir, "figura_comparativa_loss_123.png"),
-  plot = plot_loss_progresion,
-  width = 12,
-  height = 7,
-  dpi = 300
-)
-
-cat("✓ Gráfica de loss guardada\n\n")
-
-# =============================================================================
-# 4. GRÁFICA COMPARATIVA: TRAIN VS VALIDATION (Panel múltiple)
-# =============================================================================
-
-cat("Generando panel comparativo train vs validation...\n")
-
-# Preparar datos para facet (solo modelos principales)
-modelos_principales <- all_metrics %>%
-  filter(model %in% c("Modelo 1: NET-1", 
-                      "Modelo 2: MLP", 
-                      "Modelo 3: CNN (sin aug)"))
-
-# Convertir a formato largo para train y val
-datos_largo <- modelos_principales %>%
-  select(epoch, model, train_acc, val_acc) %>%
-  melt(id.vars = c("epoch", "model"),
-       variable.name = "conjunto",
-       value.name = "accuracy")
-
-# Renombrar para claridad
-datos_largo$conjunto <- factor(
-  datos_largo$conjunto,
-  levels = c("train_acc", "val_acc"),
-  labels = c("Entrenamiento", "Validación")
-)
-
-plot_train_val_panel <- ggplot(datos_largo, 
-                               aes(x = epoch, y = accuracy, 
-                                   color = conjunto, linetype = conjunto)) +
-  geom_line(size = 1) +
-  facet_wrap(~ model, ncol = 1) +
-  
-  labs(
-    title = "Análisis de Overfitting: Train vs Validation",
-    subtitle = "Comparación por modelo",
-    x = "Época",
-    y = "Accuracy",
-    color = "Conjunto",
-    linetype = "Conjunto"
-  ) +
-  
-  theme_minimal(base_size = 12) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
-    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray40"),
-    legend.position = "bottom",
-    strip.text = element_text(face = "bold", size = 11),
-    strip.background = element_rect(fill = "gray95", color = NA),
-    panel.grid.minor = element_blank(),
-    axis.title = element_text(face = "bold")
-  ) +
-  
-  scale_color_manual(values = c("Entrenamiento" = "#377EB8", 
-                                 "Validación" = "#E41A1C")) +
-  scale_linetype_manual(values = c("Entrenamiento" = "solid", 
-                                   "Validación" = "dashed")) +
-  
-  scale_y_continuous(
-    limits = c(0.5, 1.0),
-    breaks = seq(0.5, 1.0, 0.1),
-    labels = scales::percent_format(accuracy = 1)
-  ) +
-  
-  scale_x_continuous(breaks = seq(0, 50, 10))
-
-print(plot_train_val_panel)
-
-ggsave(
-  filename = file.path(data_dir, "figura_train_val_panel_123.png"),
-  plot = plot_train_val_panel,
-  width = 10,
-  height = 10,
-  dpi = 300
-)
-
-cat("✓ Panel train vs validation guardado\n\n")
-
-# =============================================================================
-# 5. TABLA COMPARATIVA DE RESULTADOS FINALES
-# =============================================================================
-
-cat("Generando tabla comparativa de resultados finales...\n")
-
-# Extraer métricas finales (última época)
-resultados_finales <- data.frame(
-  Modelo = c("NET-1", "MLP", "CNN (sin aug)", "CNN (con aug)"),
-  
-  Train_Acc = c(
-    round(tail(history_1$metrics$accuracy, 1), 4),
-    round(tail(history_2$metrics$accuracy, 1), 4),
-    round(tail(history_3_no_aug$metrics$accuracy, 1), 4),
-    round(tail(history_3_aug$metrics$accuracy, 1), 4)
-  ),
-  
-  Val_Acc = c(
-    round(tail(history_1$metrics$val_accuracy, 1), 4),
-    round(tail(history_2$metrics$val_accuracy, 1), 4),
-    round(tail(history_3_no_aug$metrics$val_accuracy, 1), 4),
-    round(tail(history_3_aug$metrics$val_accuracy, 1), 4)
-  ),
-  
-  Val_Loss = c(
-    round(tail(history_1$metrics$val_loss, 1), 4),
-    round(tail(history_2$metrics$val_loss, 1), 4),
-    round(tail(history_3_no_aug$metrics$val_loss, 1), 4),
-    round(tail(history_3_aug$metrics$val_loss, 1), 4)
-  ),
-  
-  Parametros = c(
-    "10,001",
-    "3,383,873",
-    "2,473,729",
-    "2,473,729"
-  )
-)
-
-# Calcular gap
-resultados_finales$Gap <- resultados_finales$Train_Acc - resultados_finales$Val_Acc
-
-# Calcular mejora sobre NET-1
-resultados_finales$Mejora_vs_NET1 <- 
-  (resultados_finales$Val_Acc - resultados_finales$Val_Acc[1]) * 100
-
-# Imprimir tabla
-cat("\n=== TABLA COMPARATIVA DE RESULTADOS ===\n\n")
-print(resultados_finales)
-
-# Guardar tabla
-write.csv(
-  resultados_finales,
-  file.path(data_dir, "tabla_comparativa_modelos_123.csv"),
-  row.names = FALSE
-)
-
-cat("\n✓ Tabla guardada en CSV\n\n")
-
-# =============================================================================
-# 6. GRÁFICA DE BARRAS: COMPARACIÓN FINAL DE ACCURACY
-# =============================================================================
-
-cat("Generando gráfica de barras comparativa...\n")
-
-# Preparar datos para barras
-datos_barras <- resultados_finales %>%
-  select(Modelo, Train_Acc, Val_Acc) %>%
-  melt(id.vars = "Modelo",
-       variable.name = "Conjunto",
-       value.name = "Accuracy")
-
-# Renombrar
-datos_barras$Conjunto <- factor(
-  datos_barras$Conjunto,
-  levels = c("Train_Acc", "Val_Acc"),
-  labels = c("Entrenamiento", "Validación")
-)
-
-plot_barras_comparativo <- ggplot(datos_barras, 
-                                  aes(x = Modelo, y = Accuracy, 
-                                      fill = Conjunto)) +
-  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
-  
-  # Añadir valores sobre las barras
-  geom_text(aes(label = sprintf("%.2f%%", Accuracy * 100)),
-            position = position_dodge(width = 0.7),
-            vjust = -0.5,
-            size = 3.5) +
-  
-  # Línea horizontal en 92.71% (mejor resultado)
-  geom_hline(yintercept = 0.9271, linetype = "dashed", 
-             color = "gray30", alpha = 0.5) +
-  
-  labs(
-    title = "Comparación de Accuracy: Modelos 1, 2 y 3",
-    subtitle = "Resultados finales en entrenamiento y validación",
-    x = "Modelo",
-    y = "Accuracy",
-    fill = "Conjunto"
-  ) +
-  
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
-    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "gray40"),
-    legend.position = "bottom",
-    legend.title = element_text(face = "bold"),
-    axis.title = element_text(face = "bold"),
-    axis.text.x = element_text(angle = 0, hjust = 0.5)
-  ) +
-  
-  scale_fill_manual(values = c("Entrenamiento" = "#377EB8", 
-                                "Validación" = "#E41A1C")) +
-  
-  scale_y_continuous(
-    limits = c(0, 1.05),
-    breaks = seq(0, 1.0, 0.2),
-    labels = scales::percent_format(accuracy = 1)
-  )
-
-print(plot_barras_comparativo)
-
-ggsave(
-  filename = file.path(data_dir, "figura_barras_comparativa_123.png"),
-  plot = plot_barras_comparativo,
-  width = 10,
-  height = 7,
-  dpi = 300
-)
-
-cat("✓ Gráfica de barras guardada\n\n")
-
-# =============================================================================
-# 7. RESUMEN Y CONCLUSIONES
-# =============================================================================
-
-cat("=======================================================\n")
-cat("✓ ANÁLISIS COMPARATIVO COMPLETADO\n")
-cat("=======================================================\n\n")
-
-cat("ARCHIVOS GENERADOS:\n")
-cat("1. figura_comparativa_modelos_123.png - Accuracy en validación\n")
-cat("2. figura_comparativa_loss_123.png - Loss en validación\n")
-cat("3. figura_train_val_panel_123.png - Panel train vs val\n")
-cat("4. figura_barras_comparativa_123.png - Comparación final\n")
-cat("5. tabla_comparativa_modelos_123.csv - Métricas tabuladas\n\n")
-
-cat("HALLAZGOS CLAVE:\n")
-cat("1. Mejor modelo: CNN sin augmentation (92.71% val accuracy)\n")
-cat("2. Mejora NET-1 → MLP:", 
-    sprintf("%.2f%%", resultados_finales$Mejora_vs_NET1[2]), "\n")
-cat("3. Mejora NET-1 → CNN sin aug:", 
-    sprintf("%.2f%%", resultados_finales$Mejora_vs_NET1[3]), "\n")
-cat("4. Impacto augmentation en CNN:", 
-    sprintf("%.2f%%", 
-            (resultados_finales$Val_Acc[3] - resultados_finales$Val_Acc[4]) * 100),
-    "(degradación)\n\n")
-
-cat("Gap de overfitting:\n")
-for(i in 1:nrow(resultados_finales)) {
-  cat(sprintf("  %s: %.2f%%\n", 
-              resultados_finales$Modelo[i], 
-              resultados_finales$Gap[i] * 100))
-}
-
-cat("\n=======================================================\n")
-cat("Ubicación:", data_dir, "\n")
-cat("=======================================================\n")
