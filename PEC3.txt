@@ -18,8 +18,8 @@ library(tfdatasets)
 library(reshape2)
 library(caret)
 
-# 3. Configuración inicial (Solo si no lo has hecho antes)
-#install_tensorflow()
+# 3. Configuración inicial
+install_tensorflow()
 
 # Configurar semilla para reproducibilidad
 set.seed(123L)
@@ -306,6 +306,13 @@ model <- keras_model_sequential(layers = list(
   layer_dense(units = 1L, activation = "sigmoid") # Sigmoid para clasificación binaria
 ))
 
+# Función de carga: Convierte la ruta de archivo en un tensor de imagen
+load_and_preprocess <- function(path, label) {
+  img <- tensorflow::tf$io$read_file(path)
+  img <- tensorflow::tf$image$decode_image(img, channels = 1L, expand_animations = FALSE)
+  img <- tensorflow::tf$image$resize(img, size = c(IMG_HEIGHT, IMG_WIDTH))
+  list(img, label)
+}
 
 # Aplicar transformaciones
 # Dataset SIN aumentación
@@ -321,21 +328,13 @@ ds_train_no_aug <- dataset_batch(ds_train_no_aug, BATCH_SIZE)
 train_dataset_no_aug <- dataset_prefetch(ds_train_no_aug, tensorflow::tf$data$AUTOTUNE)
 
 
-
 #Dataset con aumentación
 train_dataset_aug_base <- tensor_slices_dataset(list(
   train_data$image_path, 
   train_data$label
 ))
-# 1. Función de carga: Convierte la ruta de archivo en un tensor de imagen
-load_and_preprocess <- function(path, label) {
-  img <- tensorflow::tf$io$read_file(path)
-  img <- tensorflow::tf$image$decode_image(img, channels = 1L, expand_animations = FALSE)
-  img <- tensorflow::tf$image$resize(img, size = c(IMG_HEIGHT, IMG_WIDTH))
-  list(img, label)
-}
 
-# 2. Construcción del Dataset
+# Construcción del Dataset
 # Paso A: Transformar rutas en imágenes (3D)
 ds <- dataset_map(train_dataset_aug_base, load_and_preprocess)
 
@@ -717,19 +716,19 @@ print(results_val)
 # Calcular F1-scores
 cat("\n=== CALCULANDO F1-SCORES EN TEST ===\n")
 
-f1_1 <- calculate_f1(model_1, test_data)
+f1_1 <- calculate_f1(model_1, test_dataset)
 cat("Modelo 1 - F1 Score:", f1_1, "\n")
 
-f1_2 <- calculate_f1(model_2, test_data)
+f1_2 <- calculate_f1(model_2, test_dataset)
 cat("Modelo 2 - F1 Score:", f1_2, "\n")
 
-f1_3 <- calculate_f1(model_3, test_data)
+f1_3 <- calculate_f1(model_3, test_dataset)
 cat("Modelo 3 - F1 Score:", f1_3, "\n")
 
-f1_4 <- calculate_f1(model_4, test_data)
+f1_4 <- calculate_f1(model_4, test_dataset)
 cat("Modelo 4 - F1 Score:", f1_4, "\n")
 
-f1_5 <- calculate_f1(model_5, test_data)
+f1_5 <- calculate_f1(model_5, test_dataset)
 cat("Modelo 5 - F1 Score:", f1_5, "\n")
 
 # =============================================================================
@@ -870,8 +869,11 @@ p_loss <- ggplot(df_loss, aes(x = epoch, y = value, color = model, linetype = me
 # Combinar ambos plots
 p_combined <- grid.arrange(p_accuracy, p_loss, ncol = 1)
 
-ggsave(file.path(data_dir, file.path(data_dir, "figura_curvas_aprendizaje.png")), plot = p_combined, 
-       width = 10, height = 10, dpi = 300)
+ggsave(file.path(data_dir, "figura_curvas_aprendizaje.png"), 
+       plot = p_combined, 
+       width = 10, 
+       height = 10, 
+       dpi = 300)
 
 cat("\n✓ Figura 4 generada: 'figura4_curvas_aprendizaje.png'\n")
 
